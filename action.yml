@@ -1,0 +1,16 @@
+name: 'Automated Quality Gate'
+description: 'AI-driven code review and test generation using Gemini'
+author: 'Nonnarit Rammaneekultawat'
+inputs:
+  gemini_api_key:
+    description: 'Google Gemini API Key'
+    required: true
+  sonar_token:
+    description: 'SonarCloud Token (Optional)'
+    required: false
+  github_token:
+    description: 'GitHub Token for posting PR comments'
+    required: true
+runs:
+  using: 'node20'
+  main: 'dist/index.js'

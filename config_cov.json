@@ -1,0 +1,8 @@
+{
+  "global": 80,
+  "files": {
+    "src/math.js": 50,
+    "src/utility.js": 50,
+    "src/security_vulnerable.js": 90
+  }
+}

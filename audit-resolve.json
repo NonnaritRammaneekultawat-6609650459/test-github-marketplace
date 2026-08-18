@@ -1,0 +1,9 @@
+{
+  "decisions": [
+    {
+      "id": 1097681,
+      "reason": "Sample accepted risk: Vulnerability in a development tool not used in production.",
+      "expires": "2026-12-31"
+    }
+  ]
+}
