@@ -99,10 +99,14 @@ async function fetchSonarCloudResults() {
   }
 
   try {
+    if (!fs.existsSync('sonar-project.properties')) {
+      console.log('sonar-project.properties not found. Skipping SonarCloud fetch.');
+      return sonarReport;
+    }
     const sonarProps = fs.readFileSync('sonar-project.properties', 'utf8');
     const projectKeyMatch = sonarProps.match(/sonar.projectKey=(.+)/);
     if (!projectKeyMatch) {
-      console.error('Error: sonar.projectKey not found in sonar-project.properties');
+      console.warn('Warning: sonar.projectKey not found in sonar-project.properties. Skipping SonarCloud fetch.');
       return sonarReport;
     }
     const projectKey = projectKeyMatch[1].trim();
@@ -214,22 +218,26 @@ async function analyzeSonarFailure(sonarReport) {
 function getModifiedFiles() {
   console.log('--- Finding modified files ---');
   try {
-    // Compare current branch against origin/main (GitHub main)
-    console.log('Checking: git diff origin/main...HEAD');
+    const baseBranch = process.env.GITHUB_BASE_REF || 'main';
+    console.log(`Checking: git diff origin/${baseBranch}...HEAD`);
     
     // Check all files inside src/ to prevent missing nested files
-    const result = safeExec('git', ['diff', 'origin/main...HEAD', '--name-only', '--', 'src/']);
+    let result = safeExec('git', ['diff', `origin/${baseBranch}...HEAD`, '--name-only', '--', 'src/']);
     
     if (result.status !== 0) {
-      console.warn('Warning: Git diff command failed. Make sure origin/main exists (e.g., fetch origin main).');
+      result = safeExec('git', ['diff', `${baseBranch}...HEAD`, '--name-only', '--', 'src/']);
+    }
+    
+    if (result.status !== 0) {
+      console.warn(`Warning: Git diff command failed against branch ${baseBranch}.`);
       if (result.stderr) console.warn('Git stderr:', result.stderr.trim());
       return [];
     }
     
-    // Filter only .js files
+    // Filter .js, .ts, .jsx, .tsx files
     const files = result.stdout.split('\n')
       .map(file => file.trim())
-      .filter(file => file.endsWith('.js'));
+      .filter(file => /\.(js|ts|jsx|tsx)$/.test(file));
       
     return files;
   } catch (error) {

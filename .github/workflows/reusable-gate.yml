@@ -1,0 +1,66 @@
+name: Reusable Automated Quality Gate
+
+on:
+  workflow_call:
+    inputs:
+      node_version:
+        description: 'Node.js version to use'
+        required: false
+        default: '20'
+        type: string
+      sonar_enabled:
+        description: 'Enable SonarCloud scan'
+        required: false
+        default: true
+        type: boolean
+    secrets:
+      GEMINI_API_KEY:
+        required: true
+      GITHUB_TOKEN:
+        required: false
+      SONAR_TOKEN:
+        required: false
+
+jobs:
+  quality-gate:
+    name: Run AI Quality Gate
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+      pull-requests: write
+      statuses: write
+      checks: write
+
+    steps:
+      - name: Checkout Code
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 0 # Required for git diff comparison
+
+      - name: Set up Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: ${{ inputs.node_version }}
+          cache: 'npm'
+
+      - name: Install Dependencies
+        run: |
+          if [ -f package-lock.json ] || [ -f npm-shrinkwrap.json ]; then
+            npm ci
+          else
+            npm install
+          fi
+
+      - name: SonarCloud Scan
+        if: ${{ inputs.sonar_enabled && secrets.SONAR_TOKEN != '' }}
+        uses: sonarsource/sonarqube-scan-action@v6
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN || github.token }}
+          SONAR_TOKEN: ${{ secrets.SONAR_TOKEN }}
+
+      - name: Run Automated Quality Gate
+        uses: NonnaritRammaneekultawat-6609650459/Automated-Quality-Gate@main
+        with:
+          gemini_api_key: ${{ secrets.GEMINI_API_KEY }}
+          sonar_token: ${{ secrets.SONAR_TOKEN }}
+          github_token: ${{ secrets.GITHUB_TOKEN || github.token }}
