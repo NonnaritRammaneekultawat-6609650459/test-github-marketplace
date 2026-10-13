@@ -59,7 +59,7 @@ jobs:
           SONAR_TOKEN: ${{ secrets.SONAR_TOKEN }}
 
       - name: Run Automated Quality Gate
-        uses: NonnaritRammaneekultawat-6609650459/Automated-Quality-Gate@main
+        uses: NonnaritRammaneekultawat-6609650459/test-github-marketplace@main
         with:
           gemini_api_key: ${{ secrets.GEMINI_API_KEY }}
           sonar_token: ${{ secrets.SONAR_TOKEN }}
