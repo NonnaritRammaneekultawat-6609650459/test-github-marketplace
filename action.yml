@@ -4,13 +4,32 @@ author: 'Nonnarit Rammaneekultawat'
 inputs:
   gemini_api_key:
     description: 'Google Gemini API Key'
-    required: true
+    required: false
   sonar_token:
     description: 'SonarCloud Token (Optional)'
     required: false
   github_token:
     description: 'GitHub Token for posting PR comments'
-    required: true
+    required: false
+    default: ${{ github.token }}
+  project_type:
+    description: 'auto, javascript, or angularjs (AngularJS 1.x with Node tests)'
+    default: 'auto'
+  phase:
+    description: 'all, checks (no AI/token required), or report (never executes project code)'
+    default: 'all'
+  report_only:
+    description: 'Report failed/skipped checks without failing the AngularJS action'
+    default: 'false'
+  gemini_model:
+    description: 'Gemini model used for review'
+    default: 'gemini-3.1-flash-lite'
+  ai_timeout_seconds:
+    description: 'Time limit per Gemini request (10-180 seconds)'
+    default: '60'
+  install_status:
+    description: 'Outcome of the caller dependency installation step'
+    default: 'success'
 runs:
   using: 'node20'
   main: 'dist/index.js'
