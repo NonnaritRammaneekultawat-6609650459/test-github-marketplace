@@ -6,6 +6,7 @@ const core = require('@actions/core');
 const github = require('@actions/github');
 const promptTemplate = require('./prompt-template');
 const angularjs = require('./angularjs-support');
+const angularGeneration = require('./angularjs-generation');
 require('dotenv').config();
 
 // Configuration
@@ -920,20 +921,67 @@ No JavaScript files in \`src/\` were modified in this PR. Quality Gate checks we
 
 async function runAngularJS() {
   const phase = core.getInput('phase') || 'all';
+  const generatedMode = (core.getInput('test_source') || 'generated') === 'generated';
+  const generationDir = '.aq-generated';
   const statePath = '.gate-state.json';
   const event = github.context.payload;
   const head = event.pull_request?.head.sha || process.env.GITHUB_SHA || 'local';
   let summary = angularjs.emptySummary(head);
   try {
-    if (!['checks', 'report', 'all'].includes(phase)) throw new Error('Invalid phase');
+    if (!['generate', 'checks', 'report', 'all'].includes(phase)) throw new Error('Invalid phase');
+    if (generatedMode && phase === 'all') throw new Error('Generated mode requires separate generate, checks and report jobs');
+    if (phase === 'generate') {
+      let metadata = {ai:{status:'unavailable',findings:'Generation/review unavailable.'}, files:[],omitted:[]};
+      try {
+        if (!GEMINI_API_KEY) throw new Error('GEMINI_API_KEY is not configured');
+        const context = event.pull_request && GITHUB_TOKEN
+          ? await angularjs.remoteContext(github.getOctokit(GITHUB_TOKEN),github.context.repo,event.pull_request)
+          : angularjs.localContext();
+        if (!context.files.length) throw new Error('No source context');
+        metadata.files = context.files;
+        metadata.omitted = context.omitted;
+        const classification = await classifyFileWithGemini('AngularJS project',context.text,
+          'AngularJS 1.x application. Review DI, controllers, services, HTML bindings and persistence. Respond in Thai.');
+        metadata.ai = classification.review;
+        const result = await callGeminiWithRetry(() => model.generateContent({
+          contents:[{role:'user',parts:[{text:angularGeneration.prompt(context)}]}],
+          generationConfig:{maxOutputTokens:8192}
+        }),1);
+        angularGeneration.saveGeneration(generationDir,head,result.response.text(),metadata);
+        console.log('Generated AngularJS test suite saved for the isolated checks job.');
+      } catch (error) {
+        metadata.error = `AI test generation unavailable (${error.name || 'Error'}). Check key, model, quota or timeout.`;
+        angularGeneration.saveGeneration(generationDir,head,null,metadata);
+        console.warn(metadata.error);
+      }
+      return;
+    }
     if (phase !== 'report') {
-      summary = angularjs.runChecks({ head, installStatus: core.getInput('install_status') || 'success', audit: runNpmAudit });
+      const options = {head, installStatus: core.getInput('install_status') || 'success', audit: runNpmAudit,dir:generationDir};
+      summary = generatedMode ? angularGeneration.runGenerated(options) : angularjs.runChecks(options);
       fs.writeFileSync(statePath, JSON.stringify(summary, null, 2));
     } else {
       summary = angularjs.loadState(statePath, head);
     }
     if (phase === 'checks') {
       console.log(generateMarkdownReport(summary));
+      return;
+    }
+    if (generatedMode) {
+      summary.testOrigin = 'generated';
+      try {
+        const generated = angularGeneration.readGeneration(generationDir,head);
+        summary.generation = {status:generated.status};
+        summary.ai = generated.ai && typeof generated.ai.findings === 'string'
+          ? {status:String(generated.ai.status),findings:generated.ai.findings,remediation:generated.ai.remediation}
+          : {status:'unavailable',findings:'AI review unavailable.'};
+        summary.files = Array.isArray(generated.files) ? generated.files.filter(x=>typeof x==='string').slice(0,20) : [];
+        summary.omitted = Array.isArray(generated.omitted) ? generated.omitted.filter(x=>typeof x==='string').slice(0,100) : [];
+        if (typeof generated.error === 'string') summary.errors.push(generated.error.slice(0,500));
+      } catch {
+        summary.ai = {status:'unavailable',findings:'Generation artifact is missing or belongs to another commit.'};
+        summary.errors.push('Generated test metadata could not be loaded.');
+      }
       return;
     }
     if (!GEMINI_API_KEY) {
@@ -953,7 +1001,7 @@ async function runAngularJS() {
     summary.errors.push(`Processing incomplete (${error.name || 'Error'}). See workflow logs.`);
     console.warn(`AngularJS processing incomplete (${error.name || 'Error'}).`);
   } finally {
-    if (phase !== 'checks') {
+    if (!['checks','generate'].includes(phase)) {
       const report = generateMarkdownReport(summary);
       console.log(report);
       await postPRComment(report);

@@ -16,8 +16,11 @@ inputs:
     description: 'auto, javascript, or angularjs (AngularJS 1.x with Node tests)'
     default: 'auto'
   phase:
-    description: 'all, checks (no AI/token required), or report (never executes project code)'
+    description: 'generate, checks, report, or all (existing-test mode only)'
     default: 'all'
+  test_source:
+    description: 'generated: action creates AngularJS tests; existing: use consumer npm test'
+    default: 'generated'
   report_only:
     description: 'Report failed/skipped checks without failing the AngularJS action'
     default: 'false'

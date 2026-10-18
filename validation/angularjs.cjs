@@ -4,6 +4,7 @@ const fs = require('node:fs');
 const os = require('node:os');
 const path = require('node:path');
 const adapter = require('../angularjs-support');
+const generation = require('../angularjs-generation');
 
 test('failed existing tests remain failed while audit still runs and report keeps evidence', () => {
   const previous = process.cwd();
@@ -72,4 +73,30 @@ test('untrusted logs cannot inject HTML or bot markers into comments', () => {
   assert.ok(!report.includes('<img'));
   assert.ok(!report.includes('<!-- automated-quality-gate -->'));
   assert.ok(!report.includes('@someone'));
+});
+
+test('generation validates syntax without executing code and binds tests to the commit', () => {
+  const dir = fs.mkdtempSync(path.join(os.tmpdir(),'aq-generation-'));
+  try {
+    const code = "const {test}=require('node:test'); const {setup}=require('./harness.cjs'); throw new Error('must not execute during generation');";
+    generation.saveGeneration(dir,'abc',code,{ai:{status:'clean',findings:'ok'}});
+    assert.equal(generation.readGeneration(dir,'abc').status,'generated');
+    assert.throws(()=>generation.readGeneration(dir,'wrong-head'),/mismatch/);
+    assert.throws(()=>generation.saveGeneration(dir,'abc','const broken = ;'),SyntaxError);
+    generation.saveGeneration(dir,'abc',null,{error:'API unavailable'});
+    assert.equal(generation.readGeneration(dir,'abc').status,'unavailable');
+  } finally { fs.rmSync(dir,{recursive:true,force:true}); }
+});
+
+test('discovers AngularJS bootstrap order without consumer test scripts', () => {
+  const dir = fs.mkdtempSync(path.join(os.tmpdir(),'aq-discovery-'));
+  try {
+    fs.mkdirSync(path.join(dir,'src'));
+    fs.writeFileSync(path.join(dir,'src/module.js'),"angular.module('demo',[]);");
+    fs.writeFileSync(path.join(dir,'src/service.js'),"angular.module('demo').factory('Example',function(){});");
+    fs.writeFileSync(path.join(dir,'index.html'),'<html ng-app="demo"><script src="src/module.js"></script><script src="src/service.js"></script>');
+    const discovered = generation.discover(dir);
+    assert.deepEqual(discovered.files,['src/module.js','src/service.js']);
+    assert.deepEqual(discovered.modules,['demo']);
+  } finally { fs.rmSync(dir,{recursive:true,force:true}); }
 });

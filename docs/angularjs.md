@@ -1,41 +1,49 @@
-# AngularJS 1.x support
+# AngularJS: tests owned by the Action
 
-The existing `generate-tests.js` action entry point now supports AngularJS projects
-that use `node --test` with jsdom. `project_type: auto` detects the `angular`
-dependency; set `project_type: angularjs` explicitly in a report job with no checkout.
-JavaScript/Jest projects retain the existing generation path.
+The original generate-tests.js entry point supports AngularJS projects without
+consumer test files, npm test/check scripts, jsdom or test configuration.
+Set project_type: angularjs and test_source: generated (the default).
 
-AngularJS checks run the consumer's `npm run check` and `npm test`, capture TAP
-counts and output, and reuse the original npm audit implementation. AI review
-reuses the original Gemini classifier with AngularJS context. PR comments reuse
-the original comment publisher, now updating one bot comment and writing an Actions
-summary. The report identifies this repository as the engine.
+Run three separate GitHub Actions jobs, pinning this action to the same commit:
 
-## Two isolated jobs
+1. generate: no PR checkout. Pass the Gemini secret and a read-only GitHub token.
+   The action reads source through GitHub APIs, reuses the Gemini review pipeline,
+   and creates .aq-generated/generated.test.cjs plus a commit-bound manifest.
+   Upload .aq-generated/ as aq-generated-tests, including hidden files.
+2. checks: checkout the exact PR head with persist-credentials: false. Install
+   application dependencies with npm ci --ignore-scripts. Download the generated
+   artifact to .aq-generated/. Call phase: checks with install_status. No AI
+   secret or write token belongs in this job. Upload .gate-state.json as
+   quality-gate-results, including hidden files.
+3. report: no PR checkout. Download both artifacts, then call phase: report with
+   github_token and report_only: true. The action validates commit identities,
+   formats generated test results and the saved AI review, and updates the PR.
 
-1. On a read-only runner without secrets, checkout the PR head with
-   `persist-credentials: false`, install with `npm ci --ignore-scripts`, then use
-   this action with `project_type: angularjs`, `phase: checks`, and
-   `install_status: ${{ steps.install.outcome }}`. Upload `.gate-state.json` with
-   `actions/upload-artifact@v4` and `include-hidden-files: true`.
-2. Run a separate `if: always()` report job with `contents: read` and
-   `pull-requests: write`. Download that artifact to the workspace. Do not checkout
-   or execute PR code. Use this action with `project_type: angularjs`, `phase: report`,
-   `report_only: true`, `github_token` and `gemini_api_key` from secrets.
+Use if: always() for artifact collection and reporting so generation or test
+failures still produce a comment. Artifact download failures may continue to
+allow an unavailable-results report. The base-branch workflow can use
+pull_request_target only with this isolation; never execute PR code or generated
+tests in a job holding Gemini credentials or a write token.
 
-Pin both uses of the action to the same reviewed commit. The report job reads
-source at the PR head through GitHub APIs, validates the artifact's commit, and
-reports unavailable checks if the artifact is missing. `pull_request_target` is
-supported for fork PR comments only with this job isolation. Source is sent to
-Gemini; files/diffs are bounded and omitted files are listed. AI text is never executed.
+## Runtime
 
-`gemini_model` and `ai_timeout_seconds` are configurable. Missing keys, API errors,
-timeouts and malformed responses appear as skipped/unavailable, never clean.
-`report_only: true` keeps findings informational; report delivery failures still
-fail the action. Without it, failed/incomplete AngularJS reports fail the action.
+The Action installs its pinned jsdom runtime in runner temporary storage. It
+provides a harness that loads the consumer's AngularJS package and discovers JS
+files in src/, preferring index.html script order. The ng-app attribute selects
+the root module, with angular.module declarations as fallback. The generated
+suite uses Node's test runner and the Action's setup helper. It never needs to
+be committed into the application repository. Generated files and output are
+available through workflow artifacts. Dependencies outside the demo's supported
+bootstrap pattern may need additional setup; errors are reported, not hidden.
 
-AngularJS AI-generated tests, coverage enforcement and SonarCloud are explicitly
-deferred in this first adapter. The existing application tests are run, not replaced.
-The install check reports the outcome supplied by the calling workflow.
-Run adapter regression tests with `npm run test:angularjs`, then `npm run build`
-to update `dist/index.js`, which GitHub executes.
+The Action checks JS syntax directly and reuses its npm audit implementation.
+A failing test remains failed; no app code is rewritten and failing assertions
+are not automatically weakened. Missing keys, malformed AI output, empty suites,
+missing or stale artifacts and timeouts do not count as passing tests.
+Coverage and SonarCloud remain deferred in this AngularJS mode.
+
+Existing-test users can explicitly choose test_source: existing to retain the
+previous two-job setup. JavaScript/Jest projects keep the original path.
+
+Run npm run test:angularjs and npm run build before publishing. GitHub executes
+the committed dist/index.js bundle, including the harness and generator.
