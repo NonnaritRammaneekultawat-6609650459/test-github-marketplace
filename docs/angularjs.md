@@ -17,7 +17,9 @@ Run three separate GitHub Actions jobs, pinning this action to the same commit:
    quality-gate-results, including hidden files.
 3. report: no PR checkout. Download both artifacts, then call phase: report with
    github_token and report_only: true. The action validates commit identities,
-   formats generated test results and the saved AI review, and updates the PR.
+   formats generated test results and the saved AI review, and updates three PR
+   comments: Test Results, Security Audit and AI Code Review. Each has navigation
+   links; reruns update the same bot comments instead of adding duplicates.
 
 Use if: always() for artifact collection and reporting so generation or test
 failures still produce a comment. Artifact download failures may continue to

@@ -4,7 +4,7 @@
   "main": "index.js",
   "scripts": {
     "test": "jest --coverage",
-    "test:angularjs": "node --test tests/angularjs.cjs",
+    "test:angularjs": "node --test tests/angularjs.cjs tests/reporting.cjs",
     "gate": "node generate-tests.js",
     "build": "ncc build generate-tests.js -o dist"
   },

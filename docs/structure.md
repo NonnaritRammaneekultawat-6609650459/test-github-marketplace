@@ -10,10 +10,14 @@ test-github-marketplace/
 │   │   ├── adapter.js         Context collection, result validation and reporting
 │   │   ├── generation.js      AI test prompt, manifests, discovery and isolated execution
 │   │   └── harness.js         Action-owned AngularJS/jsdom test helper
-│   └── prompts/
-│       └── jest.js            Original JavaScript/Jest test-generation prompt
+│   ├── prompts/
+│   │   └── jest.js            Original JavaScript/Jest test-generation prompt
+│   └── reporting/
+│       ├── angularjs.js       Markdown for tests, security and AI sections
+│       └── pr-comments.js     Idempotent publication and cross-links
 ├── tests/
-│   └── angularjs.cjs          Regression tests for the Action itself
+│   ├── angularjs.cjs          Regression tests for the Action itself
+│   └── reporting.cjs          Comment formatting and repeat-publication tests
 ├── docs/
 │   ├── angularjs.md           Generated-test workflow and setup
 │   └── structure.md           This map
