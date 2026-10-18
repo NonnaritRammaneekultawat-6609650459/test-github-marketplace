@@ -3,8 +3,8 @@ const assert = require('node:assert/strict');
 const fs = require('node:fs');
 const os = require('node:os');
 const path = require('node:path');
-const adapter = require('../angularjs-support');
-const generation = require('../angularjs-generation');
+const adapter = require('../lib/angularjs/adapter');
+const generation = require('../lib/angularjs/generation');
 
 test('failed existing tests remain failed while audit still runs and report keeps evidence', () => {
   const previous = process.cwd();

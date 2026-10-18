@@ -1,4 +1,7 @@
-# Automated Quality Gate 🛡️🤖
+#
+> AngularJS projects can now use action-generated tests without maintaining a test suite or test dependencies. See [AngularJS setup](docs/angularjs.md) and the [repository structure](docs/structure.md).
+
+ Automated Quality Gate 🛡️🤖
 
 [![GitHub Marketplace](https://img.shields.io/badge/Marketplace-Automated%20Quality%20Gate-blue.svg?logo=github)](https://github.com/marketplace/actions/automated-quality-gate)
 [![License: MIT](https://img.shields.io/badge/License-MIT-yellow.svg)](https://opensource.org/licenses/MIT)
