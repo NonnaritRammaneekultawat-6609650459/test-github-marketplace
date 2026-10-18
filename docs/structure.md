@@ -9,6 +9,7 @@ test-github-marketplace/
 │   ├── angularjs/
 │   │   ├── adapter.js         Context collection, result validation and reporting
 │   │   ├── generation.js      AI test prompt, manifests, discovery and isolated execution
+│   │   ├── assertions.js      Strict assertions for plain data across jsdom realms
 │   │   └── harness.js         Action-owned AngularJS/jsdom test helper
 │   ├── prompts/
 │   │   └── jest.js            Original JavaScript/Jest test-generation prompt

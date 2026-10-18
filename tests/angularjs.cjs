@@ -78,8 +78,11 @@ test('untrusted logs cannot inject HTML or bot markers into comments', () => {
 test('generation validates syntax without executing code and binds tests to the commit', () => {
   const dir = fs.mkdtempSync(path.join(os.tmpdir(),'aq-generation-'));
   try {
-    const code = "const {test}=require('node:test'); const {setup}=require('./harness.cjs'); throw new Error('must not execute during generation');";
+    const code = "const assert=require('node:assert/strict');\nconst expected = \"require('node:assert/strict')\";\nconst {test}=require('node:test'); const {setup}=require('./harness.cjs'); throw new Error('must not execute during generation');";
     generation.saveGeneration(dir,'abc',code,{ai:{status:'clean',findings:'ok'}});
+    const saved=fs.readFileSync(path.join(dir,'generated.test.cjs'),'utf8');
+    assert.ok(saved.includes("const assert=require('./assert.cjs')"));
+    assert.ok(saved.includes("const expected = \"require('node:assert/strict')\""));
     assert.equal(generation.readGeneration(dir,'abc').status,'generated');
     assert.throws(()=>generation.readGeneration(dir,'wrong-head'),/mismatch/);
     assert.throws(()=>generation.saveGeneration(dir,'abc','const broken = ;'),SyntaxError);
@@ -99,4 +102,19 @@ test('discovers AngularJS bootstrap order without consumer test scripts', () => 
     assert.deepEqual(discovered.files,['src/module.js','src/service.js']);
     assert.deepEqual(discovered.modules,['demo']);
   } finally { fs.rmSync(dir,{recursive:true,force:true}); }
+});
+
+test('cross-realm assertions preserve real value failures and reference equality', () => {
+  const vm = require('node:vm');
+  const shim = {exports:{}};
+  new Function('require','module',require('../lib/angularjs/assertions'))(require,shim);
+  const compare = shim.exports;
+  const foreign = vm.runInNewContext('({items:[1,undefined,NaN], nested:{value:2}})');
+  compare.deepStrictEqual(foreign,{items:[1,undefined,NaN],nested:{value:2}});
+  assert.throws(()=>compare.deepStrictEqual(foreign,{items:[1,undefined,NaN],nested:{value:3}}));
+  assert.throws(()=>compare.strictEqual(foreign,{}));
+  assert.throws(()=>compare.deepStrictEqual(new Array(1),[undefined]));
+  assert.throws(()=>compare.deepStrictEqual(Object.create(null),{}));
+  class Example {constructor(){this.x=1;}}
+  assert.throws(()=>compare.deepStrictEqual(new Example(),{x:1}));
 });

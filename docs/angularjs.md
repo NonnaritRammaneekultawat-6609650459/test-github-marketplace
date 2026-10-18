@@ -39,6 +39,10 @@ available through workflow artifacts. Dependencies outside the demo's supported
 bootstrap pattern may need additional setup; errors are reported, not hidden.
 
 The Action checks JS syntax directly and reuses its npm audit implementation.
+Its assertion helper compares plain Object/Array data across Node and jsdom
+realms while preserving value, sparse-array, custom-class and reference checks.
+The generator normalizes strict-assert imports to that helper, never assertions
+or expected results. Storage failures use the harness's failStorageWrites helper.
 A failing test remains failed; no app code is rewritten and failing assertions
 are not automatically weakened. Missing keys, malformed AI output, empty suites,
 missing or stale artifacts and timeouts do not count as passing tests.

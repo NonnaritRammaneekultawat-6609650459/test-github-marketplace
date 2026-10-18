@@ -209,6 +209,41 @@ module.exports = {childEnvironment, detectProject, emptySummary, runChecks, load
 
 /***/ }),
 
+/***/ 7057:
+/***/ ((module) => {
+
+// Plain data crosses jsdom's VM boundary. Preserve value checks without requiring
+// its built-in Object/Array prototypes to equal Node's built-in prototypes.
+module.exports = String.raw`
+const strict = require('node:assert/strict');
+function hostData(value, seen = new WeakMap()) {
+  if (value === null || typeof value !== 'object') return value;
+  const proto = Object.getPrototypeOf(value);
+  const array = Array.isArray(value) && proto?.constructor?.name === 'Array';
+  const plain = Object.prototype.toString.call(value) === '[object Object]' &&
+    (proto === null || proto?.constructor?.name === 'Object');
+  if (!array && !plain) return value;
+  if (seen.has(value)) return seen.get(value);
+  const copy = array ? new Array(value.length) : proto === null ? Object.create(null) : {};
+  seen.set(value, copy);
+  for (const key of Reflect.ownKeys(value)) {
+    if (Object.prototype.propertyIsEnumerable.call(value, key)) {
+      Object.defineProperty(copy, key, {value:hostData(value[key], seen), enumerable:true, writable:true, configurable:true});
+    }
+  }
+  return copy;
+}
+const assert = Object.assign((...args) => strict(...args), strict);
+assert.deepStrictEqual = (actual, expected, ...rest) => strict.deepStrictEqual(hostData(actual), hostData(expected), ...rest);
+assert.notDeepStrictEqual = (actual, expected, ...rest) => strict.notDeepStrictEqual(hostData(actual), hostData(expected), ...rest);
+assert.deepEqual = assert.deepStrictEqual;
+assert.notDeepEqual = assert.notDeepStrictEqual;
+module.exports = assert;
+`;
+
+
+/***/ }),
+
 /***/ 7678:
 /***/ ((module, __unused_webpack_exports, __nccwpck_require__) => {
 
@@ -218,11 +253,13 @@ const os = __nccwpck_require__(8161);
 const vm = __nccwpck_require__(714);
 const {spawnSync} = __nccwpck_require__(1421);
 const harness = __nccwpck_require__(578);
+const assertions = __nccwpck_require__(7057);
 const adapter = __nccwpck_require__(9329);
 
 function prompt(context) {
   return `Generate a complete runnable CommonJS Node.js test file for this AngularJS 1.x app.
-Return ONLY JavaScript code, without markdown. Use require('node:test') and require('node:assert/strict').
+Return ONLY JavaScript code, without markdown. Use require('node:test') and require('./assert.cjs').
+The action provides assert.cjs with Node strict assertions and plain-data comparisons across jsdom realms.
 Use const {setup} = require('./harness.cjs'); for the environment. The action provides this helper:
 setup() returns {dom, window, angular, injector, get(name), controller(name, locals), readPage(name='index.html'), failStorageWrites(), close()}.
 It loads AngularJS, then the application's JS files in HTML script order and creates an injector.
@@ -246,6 +283,8 @@ function saveGeneration(dir, head, code, metadata = {}) {
   const state = {version:1, head, status:'unavailable', ...metadata};
   if (code) {
     code = code.trim().replace(/^```(?:javascript|js)?\s*\n?/, '').replace(/\n?```$/, '').trim();
+    // Normalize the import, never rewrite assertions or expected results.
+    code = code.replace(/^(\s*(?:const|let|var)\s+(?:[A-Za-z_$][\w$]*|\{[^}\n]+\})\s*=\s*)require\(\s*(['"])(?:node:)?assert\/strict\2\s*\)/gm, "$1require('./assert.cjs')");
     if (code.length > 60000) throw new Error('Generated test source exceeds limit');
     new vm.Script(code, {filename:'generated.test.cjs'}); // Parse only; never execute with credentials.
     if (!code.includes('node:test') || !code.includes('harness.cjs')) throw new Error('Unsupported generated test format');
@@ -336,6 +375,7 @@ function runGenerated({head, dir, installStatus, audit}) {
     summary.runtime = {status:installed.status};
     if (installed.status !== 'passed') throw new Error('Action test runtime installation failed');
     fs.writeFileSync(path.join(runtime,'harness.cjs'),harness);
+    fs.writeFileSync(path.join(runtime,'assert.cjs'),assertions);
     fs.copyFileSync(testPath,path.join(runtime,'generated.test.cjs'));
     summary.tests = command(process.execPath,['--test','--test-reporter=tap',path.join(runtime,'generated.test.cjs')],{
       cwd:runtime,env:{...adapter.childEnvironment(),AQ_PROJECT_ROOT:root,
