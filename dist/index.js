@@ -1115,7 +1115,8 @@ async function run() {
         console.log(testCode);
         console.log('::endgroup::\n');
 
-        testsGeneratedCount++;
+        // A failed API request returns a diagnostic comment, not a generated suite.
+        if (!testCode.startsWith('// Failed to generate tests for ')) testsGeneratedCount++;
       }
       summary.testsGenerated = testsGeneratedCount;
       summary.coverage.required = Math.round(totalThreshold / modifiedFiles.length) || 80;
