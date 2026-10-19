@@ -3,6 +3,30 @@ const assert = require('node:assert/strict');
 const {emptySummary} = require('../lib/angularjs/adapter');
 const {renderComments} = require('../lib/reporting/angularjs');
 const {publishComments,markers} = require('../lib/reporting/pr-comments');
+const {renderJavaScriptComments,jestResults} = require('../lib/reporting/javascript');
+
+test('JavaScript shares three reports while retaining Jest, coverage and Sonar data', () => {
+  const tests=jestResults({numTotalTests:3,numPassedTests:1,numFailedTests:1,numPendingTests:1,
+    testResults:[{assertionResults:[{status:'passed',fullName:'adds'},{status:'failed',fullName:'rejects'},{status:'pending',fullName:'later'}]}]},'test log',1);
+  const parts=renderJavaScriptComments({tests,modifiedFiles:['src/a.js'],testsGenerated:1,
+    classifications:{'src/a.js':{importance:'high',targetCoverage:90,review:{status:'unavailable',findings:'API unavailable'}}},
+    fileStatus:{'src/a.js':{actual:75,pass:false}},coverageMet:false,
+    audit:{status:'complete',isSecure:true,moderate:2},sonar:{passed:true,metrics:{bugs:0}}},'model','abc');
+  assert.deepEqual(parts.map(p=>p.key),['tests','security','ai']);
+  assert.match(parts[0].body,/Jest/); assert.match(parts[0].body,/75%/);
+  assert.match(parts[0].body,/⏭️.*later/); assert.match(parts[0].body,/\*\*3\*\*.*\*\*1\*\*.*\*\*1\*\*.*\*\*1\*\*/);
+  assert.match(parts[1].body,/SonarCloud/); assert.match(parts[1].body,/PASS/);
+  assert.match(parts[2].body,/รีวิวไม่สำเร็จ/); assert.match(parts[2].body,/API unavailable/);
+  assert.ok(parts.every(p=>!p.body.includes('AngularJS 1.x')));
+});
+
+test('JavaScript skipped and absent Jest results never invent passing counts', () => {
+  assert.equal(jestResults(null,'process failed',1).status,'unavailable');
+  assert.equal(jestResults({numTotalTests:0},'',0).status,'unavailable');
+  const parts=renderJavaScriptComments({skipped:true},'model','abc');
+  assert.equal(parts.length,3); assert.match(parts[0].body,/SKIPPED/);
+  assert.match(parts[1].body,/ตรวจไม่สำเร็จ/);
+});
 
 test('reports separate tests, security and AI with readable results and escaped logs', () => {
   const summary = emptySummary('abc');
