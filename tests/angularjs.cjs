@@ -118,3 +118,24 @@ test('cross-realm assertions preserve real value failures and reference equality
   class Example {constructor(){this.x=1;}}
   assert.throws(()=>compare.deepStrictEqual(new Example(),{x:1}));
 });
+
+test('harness registers cleanup without a generated test context variable', () => {
+  const hooks = [];
+  let closed = 0;
+  const shim = {exports:{}};
+  class DOM {
+    constructor() {
+      this.window = {eval(){}, angular:{injector:()=>({})}, close:()=>closed++};
+    }
+  }
+  const imports = name => ({
+    'node:fs':{readFileSync:()=>''}, 'node:path':{join:()=>''},
+    jsdom:{JSDOM:DOM}, 'node:test':{after:callback=>hooks.push(callback)}
+  })[name];
+  new Function('require','module',require('../lib/angularjs/harness'))(imports,shim);
+  shim.exports.setup();
+  assert.equal(closed,0);
+  assert.equal(hooks.length,1);
+  hooks[0]();
+  assert.equal(closed,1);
+});

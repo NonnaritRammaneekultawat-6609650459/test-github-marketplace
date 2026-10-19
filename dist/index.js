@@ -264,7 +264,9 @@ Use const {setup} = require('./harness.cjs'); for the environment. The action pr
 setup() returns {dom, window, angular, injector, get(name), controller(name, locals), readPage(name='index.html'), failStorageWrites(), close()}.
 It loads AngularJS, then the application's JS files in HTML script order and creates an injector.
 Use get('ServiceName') to access services and controller('ControllerName') to instantiate controllers.
-Each test must call setup() separately and use t.after(() => env.close()) to clean up.
+Each test must call setup() separately INSIDE its callback. setup() automatically registers cleanup
+with node:test. Do not add t.after or reference an undeclared test context variable.
+Example: test('behavior', () => { const env = setup(); const service = env.get('ActualService'); /* assertions */ });
 Read source to discover actual component names. Do not use Jest, angular-mocks, npm packages, network,
 child processes or filesystem imports. Use env.readPage() when testing templates.
 Do not require source files directly: AngularJS components are registered in the window environment.
@@ -402,6 +404,7 @@ module.exports = String.raw`
 const fs = require('node:fs');
 const path = require('node:path');
 const {JSDOM} = require('jsdom');
+const {after} = require('node:test');
 const root = process.env.AQ_PROJECT_ROOT;
 
 function setup(options = {}) {
@@ -414,6 +417,7 @@ function setup(options = {}) {
     for (const file of files) dom.window.eval(fs.readFileSync(path.join(root, file), 'utf8'));
     const modules = options.modules || JSON.parse(process.env.AQ_MODULES || '[]');
     const injector = dom.window.angular.injector(['ng', ...modules]);
+    after(() => dom.window.close());
     return {dom, window: dom.window, angular: dom.window.angular, injector,
       get: name => injector.get(name),
       controller: (name, locals = {}) => injector.get('$controller')(name, locals),
