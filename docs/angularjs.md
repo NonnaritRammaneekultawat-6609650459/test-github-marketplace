@@ -1,5 +1,9 @@
 # AngularJS: tests owned by the Action
 
+> Current source adds real coverage, saved PR tests and reusable tooling. See
+> [reviewable tests](reviewable-tests.md). The setup below documents the older
+> workflow; upgrade the pinned Action and workflow together to enable the new features.
+
 The original generate-tests.js entry point supports AngularJS projects without
 consumer test files, npm test/check scripts, jsdom or test configuration.
 Set project_type: angularjs and test_source: generated (the default).

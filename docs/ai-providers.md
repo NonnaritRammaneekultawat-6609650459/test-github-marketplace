@@ -1,5 +1,8 @@
 # User-defined AI models
 
+> For current installation, test persistence and AngularJS coverage behavior, see
+> [reviewable tests](reviewable-tests.md). The historical AngularJS coverage/report-only notes below describe the preceding workflow.
+
 The default remains the native Gemini API. There is no model allowlist. Other services
 can be used if they implement the OpenAI-compatible **Chat Completions** request and
 response format. This does not implement Anthropic Messages, OpenAI Responses, custom

@@ -1,0 +1,1 @@
+{"name":"quality-gate-angularjs-tools","version":"1.0.0","private":true,"scripts":{"test":"node run.cjs"},"dependencies":{"jsdom":"26.1.0","istanbul-lib-instrument":"6.0.3","istanbul-lib-coverage":"3.2.2","istanbul-lib-report":"3.0.1","istanbul-reports":"3.1.7"}}

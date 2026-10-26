@@ -130,7 +130,9 @@ test('harness registers cleanup without a generated test context variable', () =
   }
   const imports = name => ({
     'node:fs':{readFileSync:()=>''}, 'node:path':{join:()=>''},
-    jsdom:{JSDOM:DOM}, 'node:test':{after:callback=>hooks.push(callback)}
+    jsdom:{JSDOM:DOM}, 'node:test':{after:callback=>hooks.push(callback)},
+    'istanbul-lib-instrument':{createInstrumenter:()=>({instrumentSync:code=>code})},
+    'istanbul-lib-coverage':{createCoverageMap:()=>({merge(){},toJSON:()=>({})})}
   })[name];
   new Function('require','module',require('../lib/angularjs/harness'))(imports,shim);
   shim.exports.setup();

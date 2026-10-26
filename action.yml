@@ -2,6 +2,9 @@ name: 'Automated Quality Gate'
 description: 'AI-driven code review and test generation using Gemini'
 author: 'Nonnarit Rammaneekultawat'
 inputs:
+  persist_tests:
+    description: 'Save generated tests to the same-repository PR branch during report; requires contents/checks write'
+    default: 'false'
   ai_provider:
     description: 'API format: gemini or openai-compatible (not a model allowlist)'
     default: 'gemini'
@@ -28,7 +31,7 @@ inputs:
     description: 'auto, javascript, or angularjs (AngularJS 1.x with Node tests)'
     default: 'auto'
   phase:
-    description: 'generate, checks, report, or all (existing-test mode only)'
+    description: 'generate, checks, report, or all (legacy mode); use isolated jobs for test persistence'
     default: 'all'
   test_source:
     description: 'generated: action creates AngularJS tests; existing: use consumer npm test'
