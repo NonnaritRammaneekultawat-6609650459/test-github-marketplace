@@ -1,0 +1,122 @@
+# PR code only executes in the read-only checks job.
+name: Automated Quality Gate
+on:
+  pull_request_target:
+    types:
+      - opened
+      - synchronize
+      - reopened
+      - ready_for_review
+permissions: {}
+concurrency:
+  group: quality-${{ github.workflow }}-pr-${{ github.event.pull_request.number }}
+  cancel-in-progress: true
+jobs:
+  generate:
+    if: github.actor != 'github-actions[bot]' && github.actor != 'dependabot[bot]'
+      && github.event.pull_request.head.repo.full_name == github.repository
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    permissions:
+      contents: read
+      pull-requests: read
+    steps:
+      - name: Generate tests and review without executing PR code
+        uses: NonnaritRammaneekultawat-6609650459/test-github-marketplace@2f75838610968e9183e5c2eeb4b9433011d1dd66
+        with:
+          project_type: angularjs
+          test_source: generated
+          gemini_model: gemini-3.1-flash-lite
+          phase: generate
+          gemini_api_key: ${{ secrets.GEMINI_API_KEY }}
+          github_token: ${{ github.token }}
+          ai_timeout_seconds: "90"
+      - uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: aq-generated-tests
+          path: .aq-generated/
+          include-hidden-files: true
+          if-no-files-found: warn
+          retention-days: 7
+  checks:
+    needs: generate
+    if: always() && (github.actor != 'github-actions[bot]' && github.actor !=
+      'dependabot[bot]' && github.event.pull_request.head.repo.full_name ==
+      github.repository)
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    permissions:
+      contents: read
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          repository: ${{ github.event.pull_request.head.repo.full_name }}
+          ref: ${{ github.event.pull_request.head.sha }}
+          persist-credentials: false
+      - uses: actions/setup-node@v4
+        with:
+          node-version: "24"
+      - id: install
+        run: npm ci --ignore-scripts
+        continue-on-error: true
+      - uses: actions/download-artifact@v4
+        if: always()
+        continue-on-error: true
+        with:
+          name: aq-generated-tests
+          path: .aq-generated
+      - name: Run tests and measure coverage without AI keys or write permissions
+        uses: NonnaritRammaneekultawat-6609650459/test-github-marketplace@2f75838610968e9183e5c2eeb4b9433011d1dd66
+        if: always()
+        with:
+          project_type: angularjs
+          test_source: generated
+          phase: checks
+          install_status: ${{ steps.install.outcome }}
+      - uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: quality-gate-results
+          path: |-
+            .gate-state.json
+            coverage/
+          include-hidden-files: true
+          if-no-files-found: warn
+          retention-days: 7
+  report:
+    needs:
+      - generate
+      - checks
+    if: always() && (github.actor != 'github-actions[bot]' && github.actor !=
+      'dependabot[bot]' && github.event.pull_request.head.repo.full_name ==
+      github.repository)
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    permissions:
+      contents: write
+      pull-requests: write
+      checks: write
+    steps:
+      - uses: actions/download-artifact@v4
+        if: always()
+        continue-on-error: true
+        with:
+          name: aq-generated-tests
+          path: .aq-generated
+      - uses: actions/download-artifact@v4
+        if: always()
+        continue-on-error: true
+        with:
+          name: quality-gate-results
+          path: .
+      - name: Save tests to PR and publish results
+        uses: NonnaritRammaneekultawat-6609650459/test-github-marketplace@2f75838610968e9183e5c2eeb4b9433011d1dd66
+        with:
+          project_type: angularjs
+          test_source: generated
+          gemini_model: gemini-3.1-flash-lite
+          phase: report
+          github_token: ${{ github.token }}
+          persist_tests: "true"
+          report_only: "false"
