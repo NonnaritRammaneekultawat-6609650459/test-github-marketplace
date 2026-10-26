@@ -40,7 +40,7 @@ flowchart LR
 - รับชื่อโมเดลจากผู้ใช้โดยไม่มีรายชื่อโมเดลตายตัว
 - รัน Jest สำหรับ JavaScript หรือ Node Test Runner + jsdom สำหรับ AngularJS
 - วัด coverage และเทียบเกณฑ์รวม/เฉพาะไฟล์จาก `config_cov.json`
-- ตรวจ dependencies ด้วย npm audit และรองรับ SonarCloud แบบตัวเลือกสำหรับ JavaScript
+- ตรวจ dependencies ด้วย npm audit และรองรับ SonarCloud แบบตัวเลือกสำหรับ JavaScript และ AngularJS
 - เก็บไฟล์เทสต์ใน PR งานเดิม แม้เทสต์จะรันไม่ผ่าน
 - แยกรายงาน **Test Results**, **Security Audit** และ **AI Code Review** พร้อมอัปเดตคอมเมนต์เดิม
 - ไม่ merge อัตโนมัติ ไม่ force-push และไม่เขียนเทสต์ลง default branch โดยตรง
@@ -92,17 +92,18 @@ flowchart LR
 
 ## Workflow และสิทธิ์
 
-ใช้สาม jobs เพื่อแยกโค้ดที่ไม่น่าเชื่อถือออกจาก keys และสิทธิ์เขียน:
+ใช้สาม jobs หลัก (เพิ่ม job `sonar` เมื่อเปิด SonarCloud) เพื่อแยกโค้ดที่ไม่น่าเชื่อถือออกจาก keys และสิทธิ์เขียน:
 
 | Job | ทำอะไร | สิทธิ์/ข้อมูลที่ใช้ |
 | --- | --- | --- |
 | **generate** | อ่าน source ผ่าน GitHub API เรียก AI และสร้าง artifact | Contents read, Pull requests read และ AI key; ไม่ checkout หรือ execute โค้ด PR |
 | **checks** | Checkout PR head ที่ระบุ ติดตั้ง dependencies และรันเทสต์/coverage | Contents read; ไม่มี AI key หรือสิทธิ์เขียน repo |
 | **report** | อ่าน artifacts เพิ่มเทสต์เข้า PR และโพสต์รายงาน/check | Contents write, Pull requests write และ Checks write; ไม่ checkout หรือ execute โค้ด PR |
+| **sonar** (ตัวเลือก) | สแกน source และรับ LCOV บน runner แยก ไม่รันเทสต์ | Contents read; Sonar token |
 
 Workflow ที่เว็บสร้างใช้ `pull_request_target` โดยแยก jobs ตามตาราง ห้ามย้ายการรันโค้ดหรือเทสต์จาก PR ไปไว้ใน job generate/report ที่มี secrets หรือสิทธิ์เขียน
 
-Dependency installation ใช้ `npm ci --ignore-scripts` ใน job checks หากเปิด SonarCloud สำหรับ JavaScript เฉพาะขั้น scan จะรับ Sonar token ตาม workflow
+Dependency installation ใช้ `npm ci --ignore-scripts` ใน job checks เมื่อเปิด SonarCloud ทั้ง JavaScript และ AngularJS จะใช้ job `sonar` แยกต่างหาก ไม่รันเทสต์หรือติดตั้ง dependencies ใน job ที่ถือ Sonar token และ job report รอผลสแกนก่อนบันทึกผลรวม
 
 Artifacts ที่ใช้:
 
@@ -110,6 +111,7 @@ Artifacts ที่ใช้:
 | --- | --- |
 | `aq-generated-tests` | เทสต์และ metadata จากขั้นสร้าง ผูกกับ PR head ที่ตรวจ |
 | `quality-gate-results` | ผลเทสต์ สถานะการตรวจ และไฟล์ coverage |
+| `quality-gate-sonar` (ตัวเลือก) | metadata ของ scan task รอบปัจจุบัน |
 
 Repository/organization policies หรือ branch protection อาจไม่อนุญาตให้บันทึกเทสต์หรือสร้าง check ระบบจะแจ้งข้อผิดพลาด ไม่ข้ามข้อจำกัดนั้น
 
@@ -173,7 +175,9 @@ HTTPS URL ต้องเป็นปลายทางสาธารณะ ไ
 | `install_status` | `success` | ส่งผล dependency installation ให้ขั้น checks |
 | `persist_tests` | `false` | ตั้ง `true` ใน report เพื่อบันทึกเทสต์กลับ PR |
 | `report_only` | `false` | AngularJS: หากเป็น `true` อาจรายงานผลไม่ผ่านโดยไม่ทำให้ job ล้มเหลว; workflow ใหม่ใช้ `false` |
-| `sonar_token` | ไม่มี | Token สำหรับ SonarCloud ของ JavaScript |
+| `sonar_token` | ไม่มี | Token สำหรับ SonarCloud ของ JavaScript และ AngularJS |
+| `sonar_project_key` | ไม่มี | Project Key สำหรับรายงานผลจาก scan task รอบปัจจุบัน |
+| `sonar_scan_status` | ไม่มี | `${{ needs.sonar.result }}` และดาวน์โหลด metadata ลง `.aq-sonar/report-task.txt` |
 
 ค่า `persist_tests` ต้องเปิดผ่าน workflow ด้วย การใส่ key เพียงอย่างเดียวไม่ได้เปิดการเขียนเทสต์
 
@@ -215,7 +219,13 @@ HTTPS URL ต้องเป็นปลายทางสาธารณะ ไ
 
 AngularJS เก็บไฟล์ coverage ใน `coverage/quality-gate/` ได้แก่ `coverage-summary.json`, `lcov.info`, `index.html` และ `result.json` ส่วน JavaScript ใช้ output ของ Jest ใน `coverage/`
 
-npm audit ตรวจ dependencies แยกจากเทสต์ และใช้ High/Critical เป็นเกณฑ์ความปลอดภัย SonarCloud เป็นตัวเลือกเฉพาะ JavaScript; การวิเคราะห์อัตโนมัติของ SonarCloud แยกจาก CI scan ใน workflow นี้
+npm audit ตรวจ dependencies แยกจากเทสต์ และใช้ High/Critical เป็นเกณฑ์ความปลอดภัย SonarCloud เป็นตัวเลือกทั้ง JavaScript และ AngularJS โดยต้องปิด Automatic Analysis เพื่อใช้ CI scan และนำเข้า coverage ผ่าน GitHub Actions
+
+ตั้งค่า Project Key, Organization และ `SONAR_TOKEN` ผ่านเว็บ แล้ว merge PR ติดตั้ง/อัปเดต โปรเจกต์และแพ็กเกจ SonarCloud ต้องรองรับ PR analysis และต้องวิเคราะห์ branch หลักเป็นฐานก่อน Workflow กำหนด PR number, head/base branch และ revision ให้ชัดเจน
+
+JavaScript ส่ง `coverage/lcov.info`; AngularJS ส่ง `coverage/quality-gate/lcov.info` สแกนเฉพาะ source ใน `src/` โดยไม่รวมไฟล์ `.test`/`.spec` ผลรวมของ Action ใช้ coverage ของ statements ส่วน SonarCloud อาจแสดง line/condition coverage และโค้ดใหม่ใน PR จึงไม่จำเป็นต้องมีเปอร์เซ็นต์เท่ากัน
+
+Job `sonar` อัปโหลด `.scannerwork/report-task.txt` เป็น artifact `quality-gate-sonar` ส่วน report อ่านเฉพาะ task นั้นแล้วดึง Quality Gate ด้วย analysis ID เพื่อไม่ใช้ผลผ่านจากรอบเก่า แสดง PASS / FAIL / UNAVAILABLE แยกกันใน Security Audit หากเปิด SonarCloud แล้วสแกนหรือยืนยันผลไม่ได้ ผลรวมจะไม่ผ่าน แต่ยังเก็บเทสต์และรายงานผลเทสต์ตามเดิม ค่าสแกนมาจาก workflow ที่สร้างโดยเว็บ; scanner ไม่โหลด properties จาก branch งาน (`project.settings=/dev/null`)
 
 ## รันเทสต์ที่บันทึกแล้วซ้ำ
 
@@ -287,6 +297,7 @@ npm run test:setup
 npm run test:angularjs
 npm run test:ai
 npm run test:pipeline
+npm run test:sonar
 npm run build
 ```
 

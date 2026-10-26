@@ -50,7 +50,12 @@ or expected results. Storage failures use the harness's failStorageWrites helper
 A failing test remains failed; no app code is rewritten and failing assertions
 are not automatically weakened. Missing keys, malformed AI output, empty suites,
 missing or stale artifacts and timeouts do not count as passing tests.
-Coverage and SonarCloud remain deferred in this AngularJS mode.
+Current installations measure coverage with Istanbul and can enable SonarCloud.
+Use [the current generated example](examples/angularjs.yml), including its separate
+`sonar` job and report inputs. AngularJS LCOV is `coverage/quality-gate/lcov.info`.
+Disable Automatic Analysis in SonarCloud, configure CI analysis and analyze the
+main branch first. Existing installations must merge an installation update PR.
+The older three-job setup above does not include the optional scan.
 
 Existing-test users can explicitly choose test_source: existing to retain the
 previous two-job setup. JavaScript/Jest projects keep the original path.

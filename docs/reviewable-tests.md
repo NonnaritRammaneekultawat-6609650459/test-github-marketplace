@@ -64,7 +64,11 @@ rewritten to obtain a passing result.
 
 Reports are saved under `coverage/quality-gate/`: `coverage-summary.json`, `lcov.info`,
 `index.html` and `result.json`. The workflow artifact includes these files. SonarCloud
-continues to be optional for JavaScript; it is not enabled for AngularJS.
+is optional for both JavaScript and AngularJS. Enable it in the UI and merge the
+updated installation PR. A separate `sonar` job consumes LCOV without running PR
+tests or installing dependencies. The report waits for that job and verifies its
+scanner task/analysis ID; failed or unavailable scans do not become a pass. Test
+evidence and persistence remain available even when SonarCloud fails.
 
 ## Maintainer verification
 

@@ -37,7 +37,8 @@ For AngularJS, preserve the generate/checks/report job isolation in `angularjs.m
 Only generate receives the AI secret. Pass provider, URL and model to generate/report;
 checks receives no AI credentials and continues to run on a read-only runner. All
 three phases must reference the same Action commit. Tests are still owned by the
-Action; coverage/SonarCloud remain deferred for AngularJS.
+Action; AngularJS supports measured coverage and optional SonarCloud through the isolated
+`sonar` job in the current UI-generated workflow.
 
 ## Failure behavior
 

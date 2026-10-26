@@ -7,6 +7,7 @@
     "test:angularjs": "node --test tests/angularjs.cjs tests/reporting.cjs",
     "test:ai": "node --test tests/ai.cjs",
     "test:pipeline": "node --test tests/pipeline.cjs",
+    "test:sonar": "node --test tests/sonar.cjs",
     "test:setup": "npm ci --prefix lib/angularjs/tooling --ignore-scripts --no-audit --no-fund && npm ci --prefix tests/fixtures/angularjs --ignore-scripts --no-audit --no-fund",
     "gate": "node generate-tests.js",
     "build": "ncc build generate-tests.js -o dist"

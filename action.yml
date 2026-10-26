@@ -23,6 +23,12 @@ inputs:
   sonar_token:
     description: 'SonarCloud Token (Optional)'
     required: false
+  sonar_project_key:
+    description: 'SonarCloud project key for commit-bound scan reporting (JavaScript and AngularJS)'
+    required: false
+  sonar_scan_status:
+    description: 'Result of the isolated sonar job; requires its report-task.txt in .aq-sonar/'
+    required: false
   github_token:
     description: 'GitHub Token for posting PR comments'
     required: false
