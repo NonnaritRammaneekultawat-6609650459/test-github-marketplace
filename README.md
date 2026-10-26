@@ -78,6 +78,8 @@ flowchart LR
 }
 ```
 
+ตัวอย่างเต็มทั้งสองไฟล์เปิด SonarCloud ไว้ ให้เปลี่ยน Project Key/Organization และบันทึก `SONAR_TOKEN` ของคุณก่อนใช้ หากไม่ต้องการ SonarCloud ให้สร้าง workflow ผ่านเว็บโดยปิดตัวเลือกนี้
+
 ตัวอย่าง workflow ตรึงกับ commit ที่มีความสามารถชุดนี้ ไม่ใช่ tag รุ่นเก่า หากเปลี่ยน Action version ให้เปลี่ยน **ทุก job เป็น commit เดียวกัน** และตรวจว่า commit นั้นมี `dist/index.js` ที่ build แล้ว
 
 **สิ่งที่โปรเจกต์ต้องมี:**

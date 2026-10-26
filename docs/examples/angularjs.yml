@@ -22,7 +22,7 @@ jobs:
       pull-requests: read
     steps:
       - name: Generate tests and review without executing PR code
-        uses: NonnaritRammaneekultawat-6609650459/test-github-marketplace@2f75838610968e9183e5c2eeb4b9433011d1dd66
+        uses: NonnaritRammaneekultawat-6609650459/test-github-marketplace@f9a3080b7fb17580a8fb67e0fc8027fa9e12623a
         with:
           project_type: angularjs
           test_source: generated
@@ -67,7 +67,7 @@ jobs:
           name: aq-generated-tests
           path: .aq-generated
       - name: Run tests and measure coverage without AI keys or write permissions
-        uses: NonnaritRammaneekultawat-6609650459/test-github-marketplace@2f75838610968e9183e5c2eeb4b9433011d1dd66
+        uses: NonnaritRammaneekultawat-6609650459/test-github-marketplace@f9a3080b7fb17580a8fb67e0fc8027fa9e12623a
         if: always()
         with:
           project_type: angularjs
@@ -84,10 +84,58 @@ jobs:
           include-hidden-files: true
           if-no-files-found: warn
           retention-days: 7
+  sonar:
+    needs: checks
+    if: always() && (github.actor != 'github-actions[bot]' && github.actor !=
+      'dependabot[bot]' && github.event.pull_request.head.repo.full_name ==
+      github.repository)
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    permissions:
+      contents: read
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: ${{ github.event.pull_request.head.sha }}
+          persist-credentials: false
+          fetch-depth: 0
+      - uses: actions/download-artifact@v4
+        if: always()
+        continue-on-error: true
+        with:
+          name: quality-gate-results
+          path: .
+      - name: SonarCloud Scan
+        uses: SonarSource/sonarqube-scan-action@v6
+        env:
+          SONAR_TOKEN: ${{ secrets.SONAR_TOKEN }}
+        with:
+          args: |-
+            -Dproject.settings=/dev/null
+            -Dsonar.host.url=https://sonarcloud.io
+            -Dsonar.projectKey=your-team_angularjs-app
+            -Dsonar.organization=your-team
+            -Dsonar.sources=src
+            -Dsonar.exclusions=src/**/*.test.js,src/**/*.spec.js,src/**/*.test.cjs,src/**/*.spec.cjs
+            -Dsonar.javascript.lcov.reportPaths=coverage/quality-gate/lcov.info
+            -Dsonar.scm.revision=${{ github.event.pull_request.head.sha }}
+            -Dsonar.pullrequest.key=${{ github.event.pull_request.number }}
+            -Dsonar.pullrequest.branch=${{ github.event.pull_request.head.ref }}
+            -Dsonar.pullrequest.base=${{ github.event.pull_request.base.ref }}
+            -Dsonar.scanner.metadataFilePath=.scannerwork/report-task.txt
+      - uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: quality-gate-sonar
+          path: .scannerwork/report-task.txt
+          include-hidden-files: true
+          if-no-files-found: warn
+          retention-days: 7
   report:
     needs:
       - generate
       - checks
+      - sonar
     if: always() && (github.actor != 'github-actions[bot]' && github.actor !=
       'dependabot[bot]' && github.event.pull_request.head.repo.full_name ==
       github.repository)
@@ -110,8 +158,14 @@ jobs:
         with:
           name: quality-gate-results
           path: .
+      - uses: actions/download-artifact@v4
+        if: always()
+        continue-on-error: true
+        with:
+          name: quality-gate-sonar
+          path: .aq-sonar
       - name: Save tests to PR and publish results
-        uses: NonnaritRammaneekultawat-6609650459/test-github-marketplace@2f75838610968e9183e5c2eeb4b9433011d1dd66
+        uses: NonnaritRammaneekultawat-6609650459/test-github-marketplace@f9a3080b7fb17580a8fb67e0fc8027fa9e12623a
         with:
           project_type: angularjs
           test_source: generated
@@ -120,3 +174,6 @@ jobs:
           github_token: ${{ github.token }}
           persist_tests: "true"
           report_only: "false"
+          sonar_token: ${{ secrets.SONAR_TOKEN }}
+          sonar_project_key: your-team_angularjs-app
+          sonar_scan_status: ${{ needs.sonar.result }}
