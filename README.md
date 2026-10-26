@@ -1,4 +1,6 @@
 #
+> User-defined AI endpoints/models are supported by the current source. See [AI API setup and failure behavior](docs/ai-providers.md). Publish the rebuilt Action commit before using it from consumer workflows.
+
 > AngularJS projects can now use action-generated tests without maintaining a test suite or test dependencies. See [AngularJS setup](docs/angularjs.md) and the [repository structure](docs/structure.md).
 
  Automated Quality Gate 🛡️🤖

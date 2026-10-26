@@ -28,6 +28,16 @@ test('JavaScript skipped and absent Jest results never invent passing counts', (
   assert.match(parts[1].body,/ตรวจไม่สำเร็จ/);
 });
 
+test('AI errors remain visible even when local JavaScript tests and review otherwise appear successful', () => {
+  const parts = renderJavaScriptComments({modifiedFiles:['src/a.js'], testsGenerated:1,
+    tests:{status:'passed',total:1,passed:1},
+    classifications:{'src/a.js':{review:{status:'clean',findings:'clean'}}},
+    aiErrors:['AI model or API URL was not found (404).']}, 'vendor/model', 'abc');
+  assert.match(parts[2].body,/รีวิวไม่สำเร็จ/);
+  assert.match(parts[2].body,/not found \(404\)/);
+  assert.match(parts[0].body,/not found \(404\)/);
+});
+
 test('reports separate tests, security and AI with readable results and escaped logs', () => {
   const summary = emptySummary('abc');
   summary.testOrigin='generated';summary.generation={status:'generated'};

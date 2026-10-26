@@ -5,6 +5,7 @@
   "scripts": {
     "test": "jest --coverage",
     "test:angularjs": "node --test tests/angularjs.cjs tests/reporting.cjs",
+    "test:ai": "node --test tests/ai.cjs",
     "gate": "node generate-tests.js",
     "build": "ncc build generate-tests.js -o dist"
   },

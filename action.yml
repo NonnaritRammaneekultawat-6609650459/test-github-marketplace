@@ -2,6 +2,18 @@ name: 'Automated Quality Gate'
 description: 'AI-driven code review and test generation using Gemini'
 author: 'Nonnarit Rammaneekultawat'
 inputs:
+  ai_provider:
+    description: 'API format: gemini or openai-compatible (not a model allowlist)'
+    default: 'gemini'
+  ai_api_url:
+    description: 'Full public HTTPS Chat Completions URL for openai-compatible APIs; no query or credentials'
+    required: false
+  ai_model:
+    description: 'User-defined model ID; overrides gemini_model'
+    required: false
+  ai_api_key:
+    description: 'API key for openai-compatible service; never put plaintext in workflow'
+    required: false
   gemini_api_key:
     description: 'Google Gemini API Key'
     required: false
