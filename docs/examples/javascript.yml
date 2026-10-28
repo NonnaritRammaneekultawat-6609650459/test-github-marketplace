@@ -16,13 +16,12 @@ jobs:
     if: github.actor != 'github-actions[bot]' && github.actor != 'dependabot[bot]'
       && github.event.pull_request.head.repo.full_name == github.repository
     runs-on: ubuntu-latest
-    timeout-minutes: 10
     permissions:
       contents: read
       pull-requests: read
     steps:
       - name: Generate tests and review without executing PR code
-        uses: NonnaritRammaneekultawat-6609650459/test-github-marketplace@f9a3080b7fb17580a8fb67e0fc8027fa9e12623a
+        uses: NonnaritRammaneekultawat-6609650459/test-github-marketplace@eec005e1c762aa2c3064f1eb1cd3a8127adf3484
         with:
           project_type: javascript
           test_source: generated
@@ -30,7 +29,6 @@ jobs:
           phase: generate
           gemini_api_key: ${{ secrets.GEMINI_API_KEY }}
           github_token: ${{ github.token }}
-          ai_timeout_seconds: "90"
       - uses: actions/upload-artifact@v4
         if: always()
         with:
@@ -67,7 +65,7 @@ jobs:
           name: aq-generated-tests
           path: .aq-generated
       - name: Run tests and measure coverage without AI keys or write permissions
-        uses: NonnaritRammaneekultawat-6609650459/test-github-marketplace@f9a3080b7fb17580a8fb67e0fc8027fa9e12623a
+        uses: NonnaritRammaneekultawat-6609650459/test-github-marketplace@eec005e1c762aa2c3064f1eb1cd3a8127adf3484
         if: always()
         with:
           project_type: javascript
@@ -122,7 +120,7 @@ jobs:
             -Dsonar.pullrequest.key=${{ github.event.pull_request.number }}
             -Dsonar.pullrequest.branch=${{ github.event.pull_request.head.ref }}
             -Dsonar.pullrequest.base=${{ github.event.pull_request.base.ref }}
-            -Dsonar.scanner.metadataFilePath=.scannerwork/report-task.txt
+            -Dsonar.scanner.metadataFilePath=${{ github.workspace }}/.scannerwork/report-task.txt
       - uses: actions/upload-artifact@v4
         if: always()
         with:
@@ -165,7 +163,7 @@ jobs:
           name: quality-gate-sonar
           path: .aq-sonar
       - name: Save tests to PR and publish results
-        uses: NonnaritRammaneekultawat-6609650459/test-github-marketplace@f9a3080b7fb17580a8fb67e0fc8027fa9e12623a
+        uses: NonnaritRammaneekultawat-6609650459/test-github-marketplace@eec005e1c762aa2c3064f1eb1cd3a8127adf3484
         with:
           project_type: javascript
           test_source: generated
