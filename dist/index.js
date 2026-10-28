@@ -21,7 +21,7 @@ function failure(status) {
   if (status === 403) return new AIError('permission', 'AI account cannot access this service or model (403).', status);
   if (status === 404) return new AIError('not_found', 'AI model or API URL was not found (404).', status);
   if (status === 429) return new AIError('quota', 'AI quota or rate limit exceeded (429).', status);
-  if (status >= 500) return new AIError('service', 'AI service is temporarily unavailable (503).', status);
+  if (status >= 500) return new AIError('service', `AI service is temporarily unavailable (${status}).`, status);
   return new AIError('unsupported', 'AI request was rejected; check the model and API format.', status);
 }
 
@@ -135,6 +135,51 @@ function createClient({provider = 'gemini', apiKey, model, apiUrl, timeout = 600
 }
 
 module.exports = {createClient, AIError, safeError, endpoint, publicAddress, publicLookup, postJson};
+
+
+/***/ }),
+
+/***/ 796:
+/***/ ((module, __unused_webpack_exports, __nccwpck_require__) => {
+
+const {createClient, safeError, AIError} = __nccwpck_require__(1184);
+
+// One total deadline across retries and fallback models; never retry invalid credentials.
+function createResilientClient(config, dependencies = {}) {
+  const factory = dependencies.createClient || createClient;
+  const sleep = dependencies.sleep || (ms => new Promise(resolve => setTimeout(resolve, ms)));
+  const now = dependencies.now || Date.now;
+  const warn = dependencies.warn || console.warn;
+  const models = [...new Set([config.model, ...(config.fallbackModels || '').split(',').map(s=>s.trim()).filter(Boolean)])].slice(0, 3);
+  const retryable = error => ['service','quota','timeout','connection'].includes(error.code);
+  return {async generateContent(input) {
+    const deadline = now() + config.timeout;
+    let last;
+    for (let index=0; index<models.length; index++) {
+      for (let attempt=0; attempt<2; attempt++) {
+        const remaining = deadline - now();
+        if (remaining <= 0) throw last || new AIError('timeout','AI request timed out.');
+        const slots = (models.length-index)*2-attempt;
+        const client = factory({...config,model:models[index],timeout:Math.max(1,Math.floor(remaining/slots))});
+        try {
+          const result = await client.generateContent(input);
+          if (index > 0) warn(`AI fallback model used: ${models[index]}`);
+          return result;
+        } catch (error) {
+          last = safeError(error);
+          if (!retryable(last)) throw last;
+          if (attempt === 0 && deadline-now()>1000) {
+            const delay = Math.min(5000 + Math.floor(Math.random()*1000), Math.floor((deadline-now())/4));
+            warn(`AI temporarily unavailable; retrying after ${delay}ms.`);
+            await sleep(delay);
+          }
+        }
+      }
+    }
+    throw last;
+  }};
+}
+module.exports = {createResilientClient};
 
 
 /***/ }),
@@ -713,6 +758,7 @@ const { spawnSync } = __nccwpck_require__(1421);
 const fs = __nccwpck_require__(3024);
 const path = __nccwpck_require__(6760);
 const {createClient, safeError, AIError} = __nccwpck_require__(1184);
+const {createResilientClient} = __nccwpck_require__(796);
 const core = __nccwpck_require__(7484);
 const github = __nccwpck_require__(3228);
 const promptTemplate = __nccwpck_require__(6704);
@@ -754,35 +800,21 @@ const qgConfig = getQualityGateConfig();
 
 if (GEMINI_API_KEY) core.setSecret(GEMINI_API_KEY);
 if (SONAR_TOKEN) core.setSecret(SONAR_TOKEN);
-const model = createClient({provider:AI_PROVIDER, apiKey:GEMINI_API_KEY, model:MODEL_NAME,
+const model = createResilientClient({provider:AI_PROVIDER, apiKey:GEMINI_API_KEY, model:MODEL_NAME,
+  fallbackModels:core.getInput('ai_fallback_models'),
   apiUrl:core.getInput('ai_api_url'), timeout:AI_TIMEOUT});
 const aiErrors = [];
 
 /**
  * Helper function to call Gemini API with exponential backoff retry logic.
  */
-async function callGeminiWithRetry(apiFn, maxRetries = 2, initialDelay = 1000) {
-  let lastError;
-  for (let attempt = 0; attempt < maxRetries; attempt++) {
-    try {
-      return await apiFn();
-    } catch (err) {
-      lastError = err;
-      const isRateLimit = err.status === 429;
-      const isTransient = err.status >= 500;
-
-      if ((isRateLimit || isTransient) && attempt < maxRetries - 1) {
-        const delay = initialDelay * Math.pow(2, attempt) + Math.random() * 1000;
-        console.warn(`  ! API call failed (Attempt ${attempt + 1}/${maxRetries}). Retrying in ${Math.round(delay)}ms...`);
-        await new Promise(resolve => setTimeout(resolve, delay));
-        continue;
-      }
-      const diagnostic = safeError(err);
-      aiErrors.push(diagnostic.message);
-      throw diagnostic;
-    }
+async function callGeminiWithRetry(apiFn) {
+  try { return await apiFn(); }
+  catch (error) {
+    const diagnostic = safeError(error);
+    aiErrors.push(diagnostic.message);
+    throw diagnostic;
   }
-  throw lastError;
 }
 
 /**
@@ -1984,7 +2016,7 @@ function renderComments(summary, model) {
   const generated = summary.testOrigin === 'generated';
   const testBody = `## 🧪 Automated Quality Gate · Test Results
 
-> **${label(tests.status)}** — ผลการรันทดสอบจริง
+> **${label(tests.status)}** — ${['unavailable','error'].includes(tests.status) ? 'ระบบตรวจทำงานไม่ครบ ยังสรุปผลโค้ดไม่ได้' : 'ผลการรันทดสอบจริง'}
 
 ${meta}
 
@@ -2112,7 +2144,8 @@ function renderJavaScriptComments(source, model, head) {
   summary.testNote = source.skipped ? 'ไม่มีไฟล์ JavaScript ใน src/ ที่เปลี่ยนแปลง จึงข้ามการตรวจ' :
     `Action สร้างไฟล์เทสต์ Jest ${Number(source.testsGenerated) || 0} ไฟล์ · ดูรายละเอียดใน workflow`;
   summary.audit = source.audit || summary.audit;
-  summary.coverageLabel = source.skipped ? label('skipped') : source.coverageMet === undefined ? label('unavailable') : label(source.coverageMet ? 'passed' : 'failed');
+  const measured = source.tests?.total > 0 && (Number.isFinite(source.coverage?.statements?.pct) || Number.isFinite(source.coverage?.statements) || Object.values(source.fileStatus || {}).some(s=>Number.isFinite(s.actual)));
+  summary.coverageLabel = source.skipped ? label('skipped') : !measured ? '⚠️ ยังวัดไม่ได้' : label(source.coverageMet ? 'passed' : 'failed');
   summary.coverageDetails = '\n### Coverage และความสำคัญของไฟล์\n\n| ไฟล์ | ความสำคัญ | เป้าหมาย | ผลจริง | สถานะ |\n|---|---|---|---|---|\n' +
     summary.files.map(f => { const c=source.classifications?.[f]; const s=source.fileStatus?.[f];
       return `| ${cell(f)} | ${cell(c?.importance || '—')} | ${c?.targetCoverage ?? c?.min_coverage_threshold ?? '—'}% | ${s?.actual ?? '—'}% | ${label(s ? s.pass ? 'passed' : 'failed' : 'unavailable')} |`;
@@ -2123,8 +2156,8 @@ function renderJavaScriptComments(source, model, head) {
   summary.ai.findings = 'ผลรีวิวแยกตามไฟล์แสดงด้านล่าง';
   if (source.aiErrors?.length) {
     summary.ai.status = 'unavailable';
-    summary.ai.findings = source.aiErrors.join('\n');
-    summary.errors.push(...source.aiErrors);
+    summary.ai.findings = [...new Set(source.aiErrors)].join('\n');
+    summary.errors.push(...new Set(source.aiErrors));
   }
   summary.aiDetails = reviews.map(r => `### 📄 ${cell(r.file)}\n\n**สถานะ:** ${cell(r.status || 'unavailable')}\n\n${safe(r.findings || 'ไม่มีผลรีวิว')}\n\n${r.remediation ? '💡 ' + safe(r.remediation) : ''}`).join('\n\n') +
     (source.analysis ? '\n\n### วิเคราะห์เทสต์ที่ไม่ผ่าน\n\n' + safe(source.analysis) : '') +

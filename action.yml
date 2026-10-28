@@ -2,6 +2,9 @@ name: 'Automated Quality Gate'
 description: 'AI-driven code review and test generation using Gemini'
 author: 'Nonnarit Rammaneekultawat'
 inputs:
+  ai_fallback_models:
+    description: 'Optional comma-separated fallback model IDs on the same provider (maximum two). Used only for transient failures.'
+    default: ''
   persist_tests:
     description: 'Save generated tests to the same-repository PR branch during report; requires contents/checks write'
     default: 'false'

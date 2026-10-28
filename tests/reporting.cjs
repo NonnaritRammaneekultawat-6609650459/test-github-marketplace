@@ -5,6 +5,14 @@ const {renderComments} = require('../lib/reporting/angularjs');
 const {publishComments,markers} = require('../lib/reporting/pr-comments');
 const {renderJavaScriptComments,jestResults} = require('../lib/reporting/javascript');
 
+test('missing coverage is incomplete while measured zero coverage genuinely fails', () => {
+  const missing=renderJavaScriptComments({tests:{status:'unavailable'},coverageMet:false,coverage:{}},'model','abc')[0].body;
+  assert.match(missing,/Coverage \| ⚠️ ยังวัดไม่ได้/);
+  assert.match(missing,/ยังสรุปผลโค้ดไม่ได้/);
+  const zero=renderJavaScriptComments({tests:{status:'failed',total:1},coverageMet:false,coverage:{statements:{pct:0}}},'model','abc')[0].body;
+  assert.match(zero,/Coverage \| ❌ FAIL/);
+});
+
 test('JavaScript shares three reports while retaining Jest, coverage and Sonar data', () => {
   const tests=jestResults({numTotalTests:3,numPassedTests:1,numFailedTests:1,numPendingTests:1,
     testResults:[{assertionResults:[{status:'passed',fullName:'adds'},{status:'failed',fullName:'rejects'},{status:'pending',fullName:'later'}]}]},'test log',1);

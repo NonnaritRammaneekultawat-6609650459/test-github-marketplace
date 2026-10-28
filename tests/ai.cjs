@@ -4,6 +4,39 @@ const {EventEmitter} = require('node:events');
 const {createClient, AIError, safeError, endpoint, publicAddress, publicLookup, postJson} = require('../lib/ai/client');
 
 const config = {provider:'openai-compatible', apiKey:'fake-private-key', model:'vendor/model:custom', apiUrl:'https://ai.example/v1/chat/completions', timeout:10000};
+const {createResilientClient} = require('../lib/ai/resilient');
+
+test('transient failures retry then use the configured fallback within the total budget', async () => {
+  let time=0; const calls=[];
+  const client=createResilientClient({...config,model:'primary',fallbackModels:'backup',timeout:30000},{
+    now:()=>time,sleep:async ms=>{time+=ms;},warn:()=>{},
+    createClient:options=>({generateContent:async()=>{
+      calls.push(options);time+=100;
+      if(options.model==='primary') throw new AIError('service','Unavailable',503);
+      return {response:{text:()=> 'ok'}};
+    }})
+  });
+  assert.equal((await client.generateContent('hello')).response.text(),'ok');
+  assert.deepEqual(calls.map(c=>c.model),['primary','primary','backup']);
+  assert.ok(calls.every(c=>c.timeout>0 && c.timeout<=30000));
+  assert.ok(time<30000);
+});
+
+test('invalid credentials never retry or switch models', async () => {
+  let calls=0;
+  const client=createResilientClient({...config,fallbackModels:'backup'},{warn:()=>{},
+    createClient:()=>({generateContent:async()=>{calls++;throw new AIError('authentication','Bad key',401);}})});
+  await assert.rejects(client.generateContent('hello'),e=>e.code==='authentication');
+  assert.equal(calls,1);
+});
+
+test('retry deadline stops additional calls and failure remains unavailable', async () => {
+  let time=0,calls=0;
+  const client=createResilientClient({...config,fallbackModels:'backup'},{now:()=>time,warn:()=>{},sleep:async()=>{},
+    createClient:()=>({generateContent:async()=>{calls++;time+=20000;throw new AIError('timeout','Timed out');}})});
+  await assert.rejects(client.generateContent('hello'),e=>e.code==='timeout');
+  assert.equal(calls,1);
+});
 
 test('arbitrary model IDs use the exact endpoint, key and prompt without a model allowlist', async () => {
   let calls = 0;
