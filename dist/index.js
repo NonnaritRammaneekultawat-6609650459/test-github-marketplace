@@ -72,14 +72,14 @@ function publicLookup(hostname, options, callback) {
   });
 }
 
-function postJson(url, body, key, timeout, requestImpl = https.request) {
+function postJson(url, body, key, requestImpl = https.request) {
   const literal = url.hostname.replace(/^\[|\]$/g, '');
   if (net.isIP(literal) && !publicAddress(literal)) {
     return Promise.reject(new AIError('configuration', 'AI API URL must use a public internet address.'));
   }
   return new Promise((resolve, reject) => {
     const request = requestImpl(url, {
-      method:'POST', lookup:publicLookup, signal:AbortSignal.timeout(timeout),
+      method:'POST', lookup:publicLookup,
       headers:{'Content-Type':'application/json', Authorization:`Bearer ${key}`}
     }, response => {
       // Redirects are deliberately never followed with credentials.
@@ -104,7 +104,7 @@ function postJson(url, body, key, timeout, requestImpl = https.request) {
   });
 }
 
-function createClient({provider = 'gemini', apiKey, model, apiUrl, timeout = 60000}, dependencies = {}) {
+function createClient({provider = 'gemini', apiKey, model, apiUrl}, dependencies = {}) {
   let native;
   return {async generateContent(input) {
     try {
@@ -114,7 +114,7 @@ function createClient({provider = 'gemini', apiKey, model, apiUrl, timeout = 600
         throw new AIError('configuration', 'AI model name is required and must not contain control characters.');
       }
       if (provider === 'gemini') {
-        native ||= new (dependencies.GoogleGenerativeAI || GoogleGenerativeAI)(apiKey).getGenerativeModel({model}, {timeout});
+        native ||= new (dependencies.GoogleGenerativeAI || GoogleGenerativeAI)(apiKey).getGenerativeModel({model});
         const result = await native.generateContent(input);
         const text = (await result.response).text();
         if (typeof text !== 'string' || !text.trim() || Buffer.byteLength(text) > MAX_BYTES) throw new AIError('response', 'AI returned empty or oversized text.');
@@ -124,7 +124,7 @@ function createClient({provider = 'gemini', apiKey, model, apiUrl, timeout = 600
       const prompt = typeof input === 'string' ? input : input.contents?.flatMap(c => c.parts || []).map(p => p.text || '').join('\n');
       if (!prompt || Buffer.byteLength(prompt) > MAX_BYTES) throw new AIError('request', 'AI prompt is empty or exceeds the size limit.');
       // Keep the request minimal; model-specific optional parameters reduce compatibility.
-      const data = await (dependencies.postJson || postJson)(url, {model, messages:[{role:'user', content:prompt}]}, apiKey, timeout);
+      const data = await (dependencies.postJson || postJson)(url, {model, messages:[{role:'user', content:prompt}]}, apiKey);
       const choice = data?.choices?.[0];
       const text = choice?.message?.content;
       if (choice?.finish_reason === 'length') throw new AIError('response', 'AI response was truncated; select a model with sufficient output capacity.');
@@ -142,41 +142,27 @@ module.exports = {createClient, AIError, safeError, endpoint, publicAddress, pub
 /***/ 796:
 /***/ ((module, __unused_webpack_exports, __nccwpck_require__) => {
 
-const {createClient, safeError, AIError} = __nccwpck_require__(1184);
+const {createClient, safeError} = __nccwpck_require__(1184);
 
-// One total deadline across retries and fallback models; never retry invalid credentials.
+// Retry the selected model only; no deadline or model/provider switching.
 function createResilientClient(config, dependencies = {}) {
   const factory = dependencies.createClient || createClient;
   const sleep = dependencies.sleep || (ms => new Promise(resolve => setTimeout(resolve, ms)));
-  const now = dependencies.now || Date.now;
+  const random = dependencies.random || Math.random;
   const warn = dependencies.warn || console.warn;
-  const models = [...new Set([config.model, ...(config.fallbackModels || '').split(',').map(s=>s.trim()).filter(Boolean)])].slice(0, 3);
-  const retryable = error => ['service','quota','timeout','connection'].includes(error.code);
+  const {provider, apiKey, model, apiUrl} = config;
+  const client = factory({provider, apiKey, model, apiUrl});
   return {async generateContent(input) {
-    const deadline = now() + config.timeout;
-    let last;
-    for (let index=0; index<models.length; index++) {
-      for (let attempt=0; attempt<2; attempt++) {
-        const remaining = deadline - now();
-        if (remaining <= 0) throw last || new AIError('timeout','AI request timed out.');
-        const slots = (models.length-index)*2-attempt;
-        const client = factory({...config,model:models[index],timeout:Math.max(1,Math.floor(remaining/slots))});
-        try {
-          const result = await client.generateContent(input);
-          if (index > 0) warn(`AI fallback model used: ${models[index]}`);
-          return result;
-        } catch (error) {
-          last = safeError(error);
-          if (!retryable(last)) throw last;
-          if (attempt === 0 && deadline-now()>1000) {
-            const delay = Math.min(5000 + Math.floor(Math.random()*1000), Math.floor((deadline-now())/4));
-            warn(`AI temporarily unavailable; retrying after ${delay}ms.`);
-            await sleep(delay);
-          }
-        }
+    for (let attempt = 0; attempt < 2; attempt++) {
+      try { return await client.generateContent(input); }
+      catch (error) {
+        const diagnostic = safeError(error);
+        if (attempt === 1 || !(diagnostic.status === 429 || diagnostic.status >= 500)) throw diagnostic;
+        const delay = 1000 + Math.floor(random() * 1000);
+        warn(`AI temporarily unavailable; retrying the selected model after ${delay}ms (attempt 2/2).`);
+        await sleep(delay);
       }
     }
-    throw last;
   }};
 }
 module.exports = {createResilientClient};
@@ -580,7 +566,7 @@ function runGenerated({head, dir, installStatus, audit}) {
     try { summary.coverage = JSON.parse(fs.readFileSync(path.join(coverageDir,'result.json'),'utf8')); }
     catch { summary.coverage = {status:'unavailable',error:'Coverage result is missing'}; }
     if (summary.coverage.status === 'unavailable') summary.errors.push(summary.coverage.error || 'Coverage unavailable');
-    if (summary.tests.status === 'passed' && (!summary.tests.total || summary.tests.passed === 0)) summary.tests.status = 'unavailable';
+    if (!summary.tests.total || (summary.tests.status === 'passed' && summary.tests.passed === 0)) summary.tests.status = 'unavailable';
     // Runtime is isolated in runner temp; GitHub removes it with the runner.
   } catch (error) {
     summary.tests.status = 'unavailable';
@@ -757,7 +743,7 @@ module.exports = {files};
 const { spawnSync } = __nccwpck_require__(1421);
 const fs = __nccwpck_require__(3024);
 const path = __nccwpck_require__(6760);
-const {createClient, safeError, AIError} = __nccwpck_require__(1184);
+const {safeError, AIError} = __nccwpck_require__(1184);
 const {createResilientClient} = __nccwpck_require__(796);
 const core = __nccwpck_require__(7484);
 const github = __nccwpck_require__(3228);
@@ -780,7 +766,6 @@ const GEMINI_API_KEY = AI_PROVIDER === 'gemini'
 const SONAR_TOKEN = core.getInput('sonar_token') || process.env.SONAR_TOKEN;
 const GITHUB_TOKEN = core.getInput('github_token') || process.env.GITHUB_TOKEN;
 const MODEL_NAME = core.getInput('ai_model') || (AI_PROVIDER === 'gemini' ? core.getInput('gemini_model') || 'gemini-3.1-flash-lite' : '');
-const AI_TIMEOUT = Math.min(180, Math.max(10, Number(core.getInput('ai_timeout_seconds')) || 60)) * 1000;
 const TEST_DIR = 'Test';
 const TEST_FILE = path.join(TEST_DIR, 'generated.test.js');
 const AUDIT_RESOLVE_FILE = 'audit-resolve.json';
@@ -801,12 +786,11 @@ const qgConfig = getQualityGateConfig();
 if (GEMINI_API_KEY) core.setSecret(GEMINI_API_KEY);
 if (SONAR_TOKEN) core.setSecret(SONAR_TOKEN);
 const model = createResilientClient({provider:AI_PROVIDER, apiKey:GEMINI_API_KEY, model:MODEL_NAME,
-  fallbackModels:core.getInput('ai_fallback_models'),
-  apiUrl:core.getInput('ai_api_url'), timeout:AI_TIMEOUT});
+  apiUrl:core.getInput('ai_api_url')});
 const aiErrors = [];
 
 /**
- * Helper function to call Gemini API with exponential backoff retry logic.
+ * Collect diagnostics; the client owns the two-attempt retry policy.
  */
 async function callGeminiWithRetry(apiFn) {
   try { return await apiFn(); }
@@ -1636,6 +1620,14 @@ async function reportSonar(head) {
   } catch { return {passed: null, status: 'unavailable', error: 'Cannot read SonarCloud project configuration.'}; }
 }
 
+function qualityFailure(framework, summary) {
+  if (!(summary.tests?.total > 0) || ['unavailable','error','skipped'].includes(summary.tests.status)) {
+    return `${framework} inspection could not complete; no verified test result. See the PR report.`;
+  }
+  if (summary.tests.status === 'failed') return `${framework} tests failed; see the failed test cases in the PR report.`;
+  return `${framework} quality requirements were not met or could not be verified; see the PR report.`;
+}
+
 async function runJavaScriptPhases() {
   const phase=core.getInput('phase');
   const pr=github.context.payload.pull_request;
@@ -1675,7 +1667,7 @@ async function runJavaScriptPhases() {
     summary.aiErrors.push(error.status ? `GitHub operation failed (${error.status}); tests may not have been saved.` : error.message);
   }
   await postPRComment(renderJavaScriptComments(summary,MODEL_NAME,head));
-  if (!summary.success) core.setFailed('JavaScript quality checks failed or are incomplete; see the PR report.');
+  if (!summary.success) core.setFailed(qualityFailure('JavaScript', summary));
 }
 
 async function runAngularJS() {
@@ -1705,7 +1697,7 @@ async function runAngularJS() {
         const result = await callGeminiWithRetry(() => model.generateContent({
           contents:[{role:'user',parts:[{text:angularGeneration.prompt(context)}]}],
           generationConfig:{maxOutputTokens:8192}
-        }),1);
+        }));
         angularGeneration.saveGeneration(generationDir,head,result.response.text(),metadata);
         console.log('Generated AngularJS test suite saved for the isolated checks job.');
       } catch (error) {
@@ -1781,7 +1773,7 @@ async function runAngularJS() {
       console.log(report);
       await postPRComment(renderComments(summary,MODEL_NAME));
       if (core.getInput('report_only') !== 'true' && !angularjs.isPassing(summary)) {
-        core.setFailed('AngularJS quality checks failed or are incomplete; see the PR report.');
+        core.setFailed(qualityFailure('AngularJS', summary));
       }
     }
   }
@@ -2008,7 +2000,10 @@ function renderComments(summary, model) {
   const run = process.env.GITHUB_RUN_ID
     ? `${process.env.GITHUB_SERVER_URL}/${process.env.GITHUB_REPOSITORY}/actions/runs/${process.env.GITHUB_RUN_ID}` : '';
   const meta = `**Commit:** \`${safe(summary.head).slice(0, 40)}\` · **Engine:** [test-github-marketplace](https://github.com/NonnaritRammaneekultawat-6609650459/test-github-marketplace)${run ? ` · [ดู workflow และดาวน์โหลดไฟล์](${run})` : ''}`;
-  const tests = summary.tests;
+  const tests = {...summary.tests};
+  if (['passed','failed'].includes(tests.status) && !(tests.total > 0)) tests.status = 'unavailable';
+  const coverageMeasured = tests.total > 0 && ['passed','failed'].includes(summary.coverage?.status) && Number.isFinite(summary.coverage?.metrics?.statements?.pct);
+  const coverageLabel = summary.coverageLabel || (coverageMeasured ? label(summary.coverage.status) + ' · Statements ' + summary.coverage.metrics.statements.pct + '% / เกณฑ์ ' + summary.coverage.required + '%' : '⚠️ ยังวัดไม่ได้');
   const count = key => Number.isInteger(tests[key]) ? tests[key] : '—';
   const cases = [...(tests.log || '').matchAll(/^(not ok|ok)\s+\d+\s+-\s+(.+)$/gm)].slice(0, 30);
   const caseTable = cases.length ? '\n### กรณีทดสอบ\n\n| ผล | รายการ |\n|:--:|---|\n' +
@@ -2016,7 +2011,7 @@ function renderComments(summary, model) {
   const generated = summary.testOrigin === 'generated';
   const testBody = `## 🧪 Automated Quality Gate · Test Results
 
-> **${label(tests.status)}** — ${['unavailable','error'].includes(tests.status) ? 'ระบบตรวจทำงานไม่ครบ ยังสรุปผลโค้ดไม่ได้' : 'ผลการรันทดสอบจริง'}
+> **${label(tests.status)}** — ${['unavailable','error'].includes(tests.status) ? 'ระบบตรวจทำงานไม่สำเร็จ ยังสรุปผลโค้ดไม่ได้' : tests.status === 'failed' ? 'เทสต์ไม่ผ่าน — ดูกรณีทดสอบที่ล้มเหลวด้านล่าง' : 'ผลการรันทดสอบจริง'}
 
 ${meta}
 
@@ -2032,11 +2027,11 @@ ${meta}
 | ตรวจไวยากรณ์ JavaScript | ${label(summary.syntax.status)} |
 | สร้างเทสต์ด้วย AI | ${generated ? summary.generation?.status === 'generated' ? '✅ สร้างสำเร็จ' : '⚠️ ไม่พร้อมใช้งาน' : '⏭️ ใช้เทสต์เดิมของโปรเจกต์'} |
 | รันเทสต์ด้วย ${cell(summary.runner || 'Node + jsdom')} | ${label(tests.status)} |
-| Coverage | ${summary.coverageLabel || (summary.coverage ? label(summary.coverage.status) + ' · Statements ' + (summary.coverage.metrics?.statements?.pct ?? '—') + '% / เกณฑ์ ' + (summary.coverage.required ?? '—') + '%' : '⏭️ ยังไม่ได้วัด')} |
+| Coverage | ${coverageLabel} |
 ${caseTable}
 ${summary.coverageDetails || ''}
-${summary.coverage?.metrics ? '\n| Coverage | ผลจริง |\n|---|---|\n' + ['statements','branches','functions','lines'].map(k=>'| '+k+' | '+summary.coverage.metrics[k].pct+'% |').join('\n') : ''}
-${summary.coverage?.files ? '\n| ไฟล์ | Statements | เกณฑ์เฉพาะไฟล์ |\n|---|---|---|\n' + Object.entries(summary.coverage.files).slice(0,20).map(([name,data])=>'| '+cell(name)+' | '+cell(data.statements?.pct)+'% | '+cell(summary.coverage.fileThresholds?.[name] ?? '—')+' |').join('\n') : ''}
+${coverageMeasured && summary.coverage?.metrics ? '\n| Coverage | ผลจริง |\n|---|---|\n' + ['statements','branches','functions','lines'].map(k=>'| '+k+' | '+summary.coverage.metrics[k].pct+'% |').join('\n') : ''}
+${coverageMeasured && summary.coverage?.files ? '\n| ไฟล์ | Statements | เกณฑ์เฉพาะไฟล์ |\n|---|---|---|\n' + Object.entries(summary.coverage.files).slice(0,20).map(([name,data])=>'| '+cell(name)+' | '+cell(data.statements?.pct)+'% | '+cell(summary.coverage.fileThresholds?.[name] ?? '—')+' |').join('\n') : ''}
 ${summary.persistence ? '\n**ไฟล์เทสต์ใน PR:** '+safe(summary.persistence)+'\n' : ''}
 
 <details>
@@ -2147,7 +2142,7 @@ function renderJavaScriptComments(source, model, head) {
   const measured = source.tests?.total > 0 && (Number.isFinite(source.coverage?.statements?.pct) || Number.isFinite(source.coverage?.statements) || Object.values(source.fileStatus || {}).some(s=>Number.isFinite(s.actual)));
   summary.coverageLabel = source.skipped ? label('skipped') : !measured ? '⚠️ ยังวัดไม่ได้' : label(source.coverageMet ? 'passed' : 'failed');
   summary.coverageDetails = '\n### Coverage และความสำคัญของไฟล์\n\n| ไฟล์ | ความสำคัญ | เป้าหมาย | ผลจริง | สถานะ |\n|---|---|---|---|---|\n' +
-    summary.files.map(f => { const c=source.classifications?.[f]; const s=source.fileStatus?.[f];
+    summary.files.map(f => { const c=source.classifications?.[f]; const s=measured ? source.fileStatus?.[f] : undefined;
       return `| ${cell(f)} | ${cell(c?.importance || '—')} | ${c?.targetCoverage ?? c?.min_coverage_threshold ?? '—'}% | ${s?.actual ?? '—'}% | ${label(s ? s.pass ? 'passed' : 'failed' : 'unavailable')} |`;
     }).join('\n');
   summary.sonarDetails = sonarDetails(source.sonar, safe, label);

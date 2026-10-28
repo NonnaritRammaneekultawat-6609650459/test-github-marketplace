@@ -1,9 +1,25 @@
 # AI outages and incomplete reports
 
-The Action retries transient service, quota/rate-limit, timeout and connection failures twice per model with a delay. Authentication, permission, invalid configuration and missing models fail immediately.
+The Action uses only the model selected by the user. HTTP 429 and 5xx responses
+receive one retry after approximately 1–2 seconds (two attempts total). It never
+switches models or providers. Other errors are reported without additional retries.
 
-`ai_timeout_seconds` is the total time budget for each logical AI request, including retries and fallback models. The available request time is divided across remaining attempts so one stalled primary request does not consume the entire fallback budget.
+AI requests have no Action-defined timeout or shared retry deadline. A pending
+request waits for a response until canceled or ended by the provider/platform.
+The generated `generate` job omits a custom `timeout-minutes` value and uses
+GitHub Actions limits. Test execution, scanning and reporting keep their separate
+limits. This does not promise an unlimited GitHub Actions run.
 
-Set optional `ai_fallback_models` to up to two comma-separated model IDs available to the same provider and API key. The web installer forwards the repository Actions variable `AI_FALLBACK_MODELS` to this input. An empty variable uses only the selected primary model. Model access must be configured by the repository owner; the Action does not switch providers or credentials. Workflow logs identify fallback use.
+Legacy inputs `ai_timeout_seconds` and `ai_fallback_models` are accepted but ignored
+for compatibility with older workflow files. The web installer emits neither input
+and no longer reads the `AI_FALLBACK_MODELS` repository variable.
 
-Unavailable AI remains an incomplete check after all attempts fail. It is never reported as a clean review. Coverage without actual test execution and measurement is shown as unavailable; measured coverage below its threshold still fails. Sonar scan errors remain distinct from a failed Sonar quality gate.
+Unavailable AI remains an incomplete check after both attempts fail. It is never
+reported as a clean review. Coverage without actual test execution and measurement
+is shown as unavailable; measured coverage below its threshold still fails.
+Sonar scan errors remain distinct from a failed Sonar quality gate. Scanner
+metadata uses an absolute `${{ github.workspace }}/.scannerwork/report-task.txt`
+path in current generated workflows.
+
+Existing installations must update the pinned Action and workflow to use these
+changes; rerunning an old pinned version keeps its old timeout/retry behavior.

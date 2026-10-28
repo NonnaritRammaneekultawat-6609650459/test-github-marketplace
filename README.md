@@ -119,6 +119,8 @@ Repository/organization policies หรือ branch protection อาจไม�
 
 ## การตั้งค่า AI
 
+ใช้เฉพาะโมเดลที่ผู้ใช้เลือก ไม่มีโมเดลสำรอง และไม่มีเวลาตัดคำขอ AI ที่ Action กำหนดเอง เมื่อได้รับ 429 หรือ 5xx จะลองโมเดลเดิมซ้ำอีกหนึ่งครั้งหลังรอประมาณ 1–2 วินาที งานยังอยู่ภายใต้ขีดจำกัดของ GitHub Actions และผู้ให้บริการ AI สามารถกดยกเลิก workflow ได้
+
 ### Gemini API
 
 บันทึก `GEMINI_API_KEY` ใน Repository Secrets แล้วส่ง input ให้ขั้น generate:
@@ -130,7 +132,6 @@ with:
   gemini_model: gemini-3.1-flash-lite
   gemini_api_key: ${{ secrets.GEMINI_API_KEY }}
   github_token: ${{ github.token }}
-  ai_timeout_seconds: '90'
 ```
 
 ชื่อโมเดลข้างต้นเป็นค่าเริ่มต้นในโค้ด ไม่ใช่การยืนยันว่าบัญชีทุกบัญชีจะเรียกได้ ผู้ใช้เปลี่ยนชื่อโมเดลได้เอง
@@ -148,7 +149,6 @@ with:
   ai_model: your-model-id
   ai_api_key: ${{ secrets.AI_API_KEY }}
   github_token: ${{ github.token }}
-  ai_timeout_seconds: '90'
 ```
 
 สอง snippet นี้เป็น **inputs ของขั้น generate** ไม่ใช่ workflow ครบชุด ให้ใช้ร่วมกับตัวอย่างสาม jobs ด้านบน ขั้น checks/report ไม่ต้องรับ AI key
@@ -173,7 +173,7 @@ HTTPS URL ต้องเป็นปลายทางสาธารณะ ไ
 | `gemini_model` | `gemini-3.1-flash-lite` | ชื่อโมเดลสำหรับ Gemini |
 | `gemini_api_key` | ไม่มี | Key ของ Gemini ส่งผ่าน secret ใน generate |
 | `github_token` | `${{ github.token }}` | ใช้ GitHub API ตามสิทธิ์ของแต่ละ job |
-| `ai_timeout_seconds` | `60` | เวลารอต่อคำขอ 10–180 วินาที; เว็บตั้งเริ่มต้น 90 วินาที |
+| `ai_timeout_seconds` / `ai_fallback_models` | ไม่ใช้ | รองรับชื่อ input เดิมแต่ไม่ใช้ค่า; ไม่กำหนดเวลาตัดคำขอ AI และไม่สลับโมเดล |
 | `install_status` | `success` | ส่งผล dependency installation ให้ขั้น checks |
 | `persist_tests` | `false` | ตั้ง `true` ใน report เพื่อบันทึกเทสต์กลับ PR |
 | `report_only` | `false` | AngularJS: หากเป็น `true` อาจรายงานผลไม่ผ่านโดยไม่ทำให้ job ล้มเหลว; workflow ใหม่ใช้ `false` |

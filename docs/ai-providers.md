@@ -17,7 +17,7 @@ authentication headers, local servers, or arbitrary API protocols.
 | `ai_api_url` | Complete public HTTPS Chat Completions endpoint, including its path |
 | `ai_api_key` | Repository secret for the compatible endpoint |
 | `gemini_api_key` | Existing Gemini secret; unchanged for native Gemini |
-| `ai_timeout_seconds` | 10–180 seconds per attempt; at most two attempts for 429/5xx |
+| `ai_timeout_seconds` / `ai_fallback_models` | Deprecated and ignored; no Action-defined AI timeout or model fallback |
 
 Example inputs for a caller workflow (pin `uses` to the published commit of this
 Action, including its rebuilt `dist/index.js`):
@@ -30,7 +30,6 @@ with:
   ai_model: your-model-id
   ai_api_key: ${{ secrets.AI_API_KEY }}
   github_token: ${{ github.token }}
-  ai_timeout_seconds: '90'
 ```
 
 For AngularJS, preserve the generate/checks/report job isolation in `angularjs.md`.

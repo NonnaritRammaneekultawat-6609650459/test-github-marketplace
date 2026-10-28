@@ -3,7 +3,7 @@ description: 'AI-driven code review and test generation using Gemini'
 author: 'Nonnarit Rammaneekultawat'
 inputs:
   ai_fallback_models:
-    description: 'Optional comma-separated fallback model IDs on the same provider (maximum two). Used only for transient failures.'
+    description: 'Deprecated and ignored. Only the selected model is used.'
     default: ''
   persist_tests:
     description: 'Save generated tests to the same-repository PR branch during report; requires contents/checks write'
@@ -52,8 +52,8 @@ inputs:
     description: 'Gemini model used for review'
     default: 'gemini-3.1-flash-lite'
   ai_timeout_seconds:
-    description: 'Time limit per Gemini request (10-180 seconds)'
-    default: '60'
+    description: 'Deprecated and ignored. AI requests have no Action-defined timeout.'
+    required: false
   install_status:
     description: 'Outcome of the caller dependency installation step'
     default: 'success'

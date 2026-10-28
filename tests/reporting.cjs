@@ -13,6 +13,24 @@ test('missing coverage is incomplete while measured zero coverage genuinely fail
   assert.match(zero,/Coverage \| ❌ FAIL/);
 });
 
+test('AngularJS reports missing or unexecuted coverage as unavailable and keeps real failed tests distinct', () => {
+  for (const status of ['unavailable','error','failed','passed']) {
+    const summary = emptySummary('abc');
+    summary.tests = {status, total: 0};
+    summary.coverage = {status:'failed',required:80,metrics:{statements:{pct:0}}};
+    const report = renderComments(summary,'model')[0].body;
+    assert.match(report,/Coverage \| ⚠️ ยังวัดไม่ได้/);
+    assert.match(report,/ระบบตรวจทำงานไม่สำเร็จ/);
+    assert.ok(!report.includes('เทสต์ไม่ผ่าน'));
+  }
+  const summary = emptySummary('abc');
+  summary.tests = {status:'failed',total:1,failed:1};
+  summary.coverage = {status:'failed',required:80,metrics:Object.fromEntries(['statements','branches','functions','lines'].map(k=>[k,{pct:0}]))};
+  const report = renderComments(summary,'model')[0].body;
+  assert.match(report,/เทสต์ไม่ผ่าน/);
+  assert.match(report,/Coverage \| ❌ FAIL/);
+});
+
 test('JavaScript shares three reports while retaining Jest, coverage and Sonar data', () => {
   const tests=jestResults({numTotalTests:3,numPassedTests:1,numFailedTests:1,numPendingTests:1,
     testResults:[{assertionResults:[{status:'passed',fullName:'adds'},{status:'failed',fullName:'rejects'},{status:'pending',fullName:'later'}]}]},'test log',1);

@@ -6,42 +6,47 @@ const {createClient, AIError, safeError, endpoint, publicAddress, publicLookup, 
 const config = {provider:'openai-compatible', apiKey:'fake-private-key', model:'vendor/model:custom', apiUrl:'https://ai.example/v1/chat/completions', timeout:10000};
 const {createResilientClient} = require('../lib/ai/resilient');
 
-test('transient failures retry then use the configured fallback within the total budget', async () => {
-  let time=0; const calls=[];
-  const client=createResilientClient({...config,model:'primary',fallbackModels:'backup',timeout:30000},{
-    now:()=>time,sleep:async ms=>{time+=ms;},warn:()=>{},
-    createClient:options=>({generateContent:async()=>{
-      calls.push(options);time+=100;
-      if(options.model==='primary') throw new AIError('service','Unavailable',503);
-      return {response:{text:()=> 'ok'}};
-    }})
+for (const status of [429, 503]) test(`HTTP ${status} retries only the selected model twice without a deadline`, async () => {
+  let calls = 0; const waits = []; const models = [];
+  const client = createResilientClient({...config, fallbackModels:'backup', timeout:1}, {
+    random:()=>0.5, sleep:async ms=>{waits.push(ms);}, warn:()=>{},
+    createClient:options=>{
+      models.push(options.model);
+      assert.equal(options.timeout, undefined);
+      assert.equal(options.fallbackModels, undefined);
+      return {generateContent:async()=>{calls++; throw Object.assign(new Error('unavailable'), {status});}};
+    }
   });
-  assert.equal((await client.generateContent('hello')).response.text(),'ok');
-  assert.deepEqual(calls.map(c=>c.model),['primary','primary','backup']);
-  assert.ok(calls.every(c=>c.timeout>0 && c.timeout<=30000));
-  assert.ok(time<30000);
+  await assert.rejects(client.generateContent('hello'), e=>e.status===status);
+  assert.equal(calls, 2);
+  assert.deepEqual(models, [config.model]);
+  assert.deepEqual(waits, [1500]);
 });
 
-test('invalid credentials never retry or switch models', async () => {
+test('a pending AI request waits for its response, and a recovered retry returns it', async () => {
+  let resolveRequest; let calls=0;
+  const pending=new Promise(resolve=>{resolveRequest=resolve;});
+  const client=createResilientClient({...config,timeout:1}, {sleep:async()=>{},warn:()=>{},
+    createClient:()=>({generateContent:async()=>{calls++; if(calls===1) throw new AIError('service','Unavailable',503); return pending;}})});
+  const response=client.generateContent('hello');
+  await new Promise(resolve=>setImmediate(resolve));
+  assert.equal(calls,2);
+  resolveRequest({response:{text:()=> 'response from selected model'}});
+  assert.equal((await response).response.text(),'response from selected model');
+});
+
+for (const [code,status] of [['authentication',401],['permission',403],['not_found',404],['timeout',undefined],['connection',undefined]]) test(`${code} fails without changing models or additional retry`, async () => {
   let calls=0;
-  const client=createResilientClient({...config,fallbackModels:'backup'},{warn:()=>{},
-    createClient:()=>({generateContent:async()=>{calls++;throw new AIError('authentication','Bad key',401);}})});
-  await assert.rejects(client.generateContent('hello'),e=>e.code==='authentication');
-  assert.equal(calls,1);
-});
-
-test('retry deadline stops additional calls and failure remains unavailable', async () => {
-  let time=0,calls=0;
-  const client=createResilientClient({...config,fallbackModels:'backup'},{now:()=>time,warn:()=>{},sleep:async()=>{},
-    createClient:()=>({generateContent:async()=>{calls++;time+=20000;throw new AIError('timeout','Timed out');}})});
-  await assert.rejects(client.generateContent('hello'),e=>e.code==='timeout');
+  const client=createResilientClient({...config,fallbackModels:'backup'}, {warn:()=>{},
+    createClient:()=>({generateContent:async()=>{calls++;throw new AIError(code,'Unavailable',status);}})});
+  await assert.rejects(client.generateContent('hello'),e=>e.code===code);
   assert.equal(calls,1);
 });
 
 test('arbitrary model IDs use the exact endpoint, key and prompt without a model allowlist', async () => {
   let calls = 0;
-  const client = createClient(config, {postJson:async (url, body, key, timeout) => {
-    calls++; assert.equal(url.href, config.apiUrl); assert.equal(key, config.apiKey); assert.equal(timeout, 10000);
+  const client = createClient(config, {postJson:async (url, body, key) => {
+    calls++; assert.equal(url.href, config.apiUrl); assert.equal(key, config.apiKey);
     assert.deepEqual(body, {model:config.model, messages:[{role:'user',content:'write tests'}]});
     return {choices:[{message:{content:'test code'}}]};
   }});
@@ -50,11 +55,11 @@ test('arbitrary model IDs use the exact endpoint, key and prompt without a model
   assert.equal(calls,2);
 });
 
-test('native Gemini preserves its SDK contract and uses the requested model and timeout', async () => {
+test('native Gemini preserves its SDK contract and uses the requested model without a request timeout', async () => {
   class FakeGemini {
     constructor(key) { assert.equal(key, config.apiKey); }
     getGenerativeModel(options, request) {
-      assert.equal(options.model,'custom-gemini'); assert.equal(request.timeout,10000);
+      assert.equal(options.model,'custom-gemini'); assert.equal(request,undefined);
       return {generateContent:async prompt => {assert.equal(prompt,'hello'); return {response:{text:()=>'Gemini text'}};}};
     }
   }
@@ -88,14 +93,14 @@ test('unsafe URLs and private, mapped, link-local and reserved addresses are blo
   for (const url of ['http://ai.example/chat', 'https://user:pass@ai.example/chat', 'https://ai.example/chat?key=x', 'https://ai.example/#key']) assert.throws(()=>endpoint(url), AIError);
   for (const address of ['127.0.0.1','10.1.2.3','169.254.169.254','192.168.1.1','172.16.0.1','100.64.0.1','::1','::ffff:127.0.0.1','fe80::1','fc00::1','2002:7f00:1::']) assert.equal(publicAddress(address),false,address);
   for (const address of ['8.8.8.8','1.1.1.1','2606:4700:4700::1111']) assert.equal(publicAddress(address),true,address);
-  await assert.rejects(postJson(endpoint('https://127.0.0.1/chat'),{},config.apiKey,1000), /public/);
+  await assert.rejects(postJson(endpoint('https://127.0.0.1/chat'),{},config.apiKey), /public/);
   await assert.rejects(new Promise((resolve,reject)=>publicLookup('localhost',{},error=>error ? reject(error) : resolve())), /public/);
 });
 
 function mockRequest({status = 200, content = '{"choices":[]}', error} = {}) {
   return (url, options, callback) => {
     assert.equal(options.method,'POST'); assert.equal(options.headers.Authorization,'Bearer '+config.apiKey);
-    assert.equal(options.lookup,publicLookup); assert.ok(options.signal);
+    assert.equal(options.lookup,publicLookup); assert.equal(options.signal,undefined);
     const req = new EventEmitter();
     req.end = body => {
       assert.deepEqual(JSON.parse(body),{prompt:'hello'});
@@ -110,7 +115,7 @@ function mockRequest({status = 200, content = '{"choices":[]}', error} = {}) {
 }
 
 test('HTTPS transport parses bounded JSON and rejects redirects without forwarding credentials', async () => {
-  const args = [endpoint(config.apiUrl),{prompt:'hello'},config.apiKey,1000];
+  const args = [endpoint(config.apiUrl),{prompt:'hello'},config.apiKey];
   assert.deepEqual(await postJson(...args,mockRequest()),{choices:[]});
   await assert.rejects(postJson(...args,mockRequest({status:302,content:config.apiKey})),error=>error.code==='unsupported' && !error.message.includes(config.apiKey));
   await assert.rejects(postJson(...args,mockRequest({content:'not JSON '+config.apiKey})), /unsupported response format/);
