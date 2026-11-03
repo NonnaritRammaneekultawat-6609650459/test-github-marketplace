@@ -23,6 +23,9 @@ inputs:
   gemini_api_key:
     description: 'Google Gemini API Key'
     required: false
+  sonar_enabled:
+    description: 'Explicit opt-in to SonarCloud; token alone never enables it'
+    default: 'false'
   sonar_token:
     description: 'SonarCloud Token (Optional)'
     required: false

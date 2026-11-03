@@ -98,7 +98,7 @@ test('AngularJS retains test evidence when Sonar fails; both frameworks share cl
   }
 });
 
-for (const projectType of ['javascript', 'angularjs']) test(`real ${projectType} report entry retains passing tests but fails an unavailable Sonar scan`, async () => fixture(async options => {
+for (const enabled of ['true','false','','missing-key']) for (const projectType of ['javascript', 'angularjs']) test(`sonar enabled=${enabled}: real ${projectType} report entry honors opt-in while retaining tests and audit evidence`, async () => fixture(async options => {
   const {spawnSync} = require('node:child_process');
   const {childEnvironment} = require('../lib/angularjs/adapter');
   const dir = path.dirname(options.taskFile);
@@ -108,7 +108,7 @@ for (const projectType of ['javascript', 'angularjs']) test(`real ${projectType}
   state.framework = projectType;
   state.install.status = state.syntax.status = 'passed';
   state.tests = {status:'passed', total:1, passed:1};
-  state.audit = {status:'complete', isSecure:true};
+  state.audit = {status:'complete', isSecure:true, ignored:['legacy #123 — accepted until 2030-01-01'], warnings:['Expired exception: other #456']};
   state.success = state.coverageMet = true;
   state.modifiedFiles = [];
   if (projectType === 'angularjs') {
@@ -119,13 +119,18 @@ for (const projectType of ['javascript', 'angularjs']) test(`real ${projectType}
   fs.writeFileSync(path.join(dir, '.gate-state.json'), JSON.stringify(state));
   const summaryFile = path.join(dir, 'summary.md');
   fs.writeFileSync(summaryFile, '');
+  fs.writeFileSync(path.join(dir,'sonar-project.properties'),'sonar.projectKey=old-owner\n');
   const result = spawnSync(process.execPath, [path.resolve(__dirname, '../generate-tests.js')], {cwd:dir, encoding:'utf8', timeout:20000,
-    env:{...childEnvironment(), INPUT_PROJECT_TYPE:projectType, INPUT_PHASE:'report', INPUT_SONAR_PROJECT_KEY:'team:app', INPUT_SONAR_SCAN_STATUS:'failure',
+    env:{...childEnvironment(), INPUT_PROJECT_TYPE:projectType, INPUT_PHASE:'report', INPUT_SONAR_ENABLED:enabled === 'missing-key' ? 'true' : enabled, SONAR_TOKEN:'fake-env-token', INPUT_SONAR_PROJECT_KEY:enabled === 'missing-key' ? '' : 'team:app', INPUT_SONAR_SCAN_STATUS:'failure',
       INPUT_SONAR_TOKEN:'fake-sonar-key', GITHUB_REPOSITORY:'user/app', GITHUB_SHA:'abc', GITHUB_STEP_SUMMARY:summaryFile}});
-  assert.equal(result.status, 1, result.stdout + result.stderr);
+  assert.equal(result.status, ['true','missing-key'].includes(enabled) ? 1 : 0, result.stdout + result.stderr);
   const report = fs.readFileSync(summaryFile, 'utf8');
   assert.match(report, /SonarCloud/);
-  assert.match(report, /scan did not complete successfully/);
+  if (enabled === 'true') assert.match(report, /scan did not complete successfully/);
+  else if (enabled === 'missing-key') assert.match(report, /sonar_project_key is missing/);
+  else assert.match(report, /ไม่ได้เปิดใช้ SonarCloud/);
+  assert.match(report,/accepted until 2030-01-01/);
+  assert.match(report,/Expired exception: other/);
   assert.match(report, /\*\*✅ PASS\*\*/);
   assert.ok(!report.includes('fake-sonar-key'));
 }));

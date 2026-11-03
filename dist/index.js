@@ -266,6 +266,8 @@ function loadState(file, head) {
     }
     fallback.audit.isSecure = state.audit.status === 'complete'
       ? fallback.audit.critical === 0 && fallback.audit.high === 0 : null;
+    for (const key of ['ignored', 'warnings']) fallback.audit[key] = Array.isArray(state.audit[key]) ? state.audit[key].filter(x => typeof x === 'string').slice(0,500) : [];
+    if (typeof state.audit.error === 'string') fallback.audit.error = state.audit.error.slice(0,2000);
     fallback.audit.details = Array.isArray(state.audit.details) ? state.audit.details.filter(x => typeof x === 'string').slice(0, 20) : [];
     fallback.errors = Array.isArray(state.errors) ? state.errors.filter(x => typeof x === 'string').map(x => x.slice(0, 300)).slice(0, 10) : [];
     return fallback;
@@ -737,6 +739,74 @@ module.exports = {files};
 
 /***/ }),
 
+/***/ 8056:
+/***/ ((module) => {
+
+const levels = ['info', 'low', 'moderate', 'high', 'critical'];
+
+function validateExceptions(config) {
+  if (!config || !Array.isArray(config.decisions) || config.decisions.length > 500) throw new Error('audit-resolve.json must contain a decisions array (maximum 500).');
+  for (const d of config.decisions) {
+    if (!d || typeof d.package !== 'string' || !/^(@[a-z0-9._-]+\/)?[a-z0-9._-]+$/i.test(d.package) ||
+        !Number.isSafeInteger(d.id) || d.id <= 0 || typeof d.reason !== 'string' || !d.reason.trim() || d.reason.length > 1000 ||
+        typeof d.expires !== 'string' || !/^\d{4}-\d{2}-\d{2}$/.test(d.expires) ||
+        !Number.isFinite(Date.parse(d.expires)) || new Date(d.expires).toISOString().slice(0,10) !== d.expires) {
+      throw new Error('Each audit exception requires package, numeric advisory id, reason and a valid expires date (YYYY-MM-DD).');
+    }
+  }
+  return config.decisions;
+}
+
+function evaluateAudit(data, config = {decisions: []}, today = new Date().toISOString().slice(0,10)) {
+  const result = {critical:0, high:0, moderate:0, low:0, isSecure:null, status:'error', details:[], ignored:[], warnings:[]};
+  try {
+    const decisions = validateExceptions(config);
+    if (data?.error || !data?.vulnerabilities || typeof data.vulnerabilities !== 'object' || Array.isArray(data.vulnerabilities)) throw new Error('npm audit returned no valid vulnerability report.');
+    const entries = data.vulnerabilities;
+    // npm reports transitive vulnerabilities as package-name references. Resolve
+    // all causes; an unknown or cyclic cause must never be silently accepted.
+    function causes(name, seen = new Set()) {
+      if (seen.has(name)) return null;
+      const v = entries[name];
+      if (!v || !Array.isArray(v.via) || !v.via.length) return null;
+      const next = new Set([...seen, name]);
+      const all = [];
+      for (const via of v.via) {
+        if (typeof via === 'string') {
+          const nested = causes(via, next);
+          if (!nested) return null;
+          all.push(...nested);
+        } else if (via && Number.isSafeInteger(via.source) && levels.includes(via.severity)) all.push(via);
+        else return null;
+      }
+      return all;
+    }
+    for (const d of decisions) if (d.expires < today) result.warnings.push(`Expired exception: ${d.package} #${d.id} (${d.expires})`);
+    for (const [name,v] of Object.entries(entries)) {
+      if (!v || v.name !== name || !levels.includes(v.severity)) throw new Error('Invalid vulnerability entry from npm audit.');
+      const all = causes(name);
+      const remaining = all?.filter(a => {
+        const d = decisions.find(d => d.package === name && d.id === a.source && d.expires >= today);
+        if (!d) return true;
+        const line = `${name} #${a.source} (${a.severity}) — ${d.reason}; expires ${d.expires}`;
+        if (!result.ignored.includes(line)) result.ignored.push(line);
+        return false;
+      });
+      if (remaining && remaining.length === 0) continue;
+      // Retain npm's package severity for unresolved causes (conservative).
+      if (v.severity !== 'info') result[v.severity]++;
+      result.details.push(`${name} (${v.severity})`);
+    }
+    result.status = 'complete';
+    result.isSecure = result.high === 0 && result.critical === 0;
+  } catch (error) { result.error = error.message; }
+  return result;
+}
+module.exports = {evaluateAudit, validateExceptions};
+
+
+/***/ }),
+
 /***/ 7849:
 /***/ ((__unused_webpack_module, __unused_webpack_exports, __nccwpck_require__) => {
 
@@ -763,7 +833,8 @@ const AI_PROVIDER = core.getInput('ai_provider') || 'gemini';
 const GEMINI_API_KEY = AI_PROVIDER === 'gemini'
   ? core.getInput('gemini_api_key') || process.env.GEMINI_API_KEY
   : core.getInput('ai_api_key') || process.env.AI_API_KEY;
-const SONAR_TOKEN = core.getInput('sonar_token') || process.env.SONAR_TOKEN;
+const SONAR_ENABLED = core.getInput('sonar_enabled') === 'true';
+const SONAR_TOKEN = SONAR_ENABLED ? core.getInput('sonar_token') || process.env.SONAR_TOKEN : '';
 const GITHUB_TOKEN = core.getInput('github_token') || process.env.GITHUB_TOKEN;
 const MODEL_NAME = core.getInput('ai_model') || (AI_PROVIDER === 'gemini' ? core.getInput('gemini_model') || 'gemini-3.1-flash-lite' : '');
 const TEST_DIR = 'Test';
@@ -818,121 +889,6 @@ function safeExec(command, args, options = {}) {
   }
 
   return result;
-}
-
-async function fetchSonarCloudResults() {
-  console.log('\n--- Fetching SonarCloud Results ---');
-  const sonarReport = {
-    passed: false,
-    metrics: {
-      bugs: 'N/A',
-      vulnerabilities: 'N/A',
-      code_smells: 'N/A',
-      security_hotspots: 'N/A'
-    },
-    issues: []
-  };
-
-  if (!SONAR_TOKEN) {
-    sonarReport.passed = null;
-    sonarReport.skipped = true;
-    console.warn('Warning: SONAR_TOKEN is not set. Skipping SonarCloud fetch.');
-    return sonarReport;
-  }
-
-  try {
-    if (!fs.existsSync('sonar-project.properties')) {
-      sonarReport.passed = null;
-      sonarReport.skipped = true;
-      console.log('sonar-project.properties not found. Skipping SonarCloud fetch.');
-      return sonarReport;
-    }
-    const sonarProps = fs.readFileSync('sonar-project.properties', 'utf8');
-    const projectKeyMatch = sonarProps.match(/sonar.projectKey=(.+)/);
-    if (!projectKeyMatch) {
-      console.warn('Warning: sonar.projectKey not found in sonar-project.properties. Skipping SonarCloud fetch.');
-      return sonarReport;
-    }
-    const projectKey = projectKeyMatch[1].trim();
-
-    let prNumber = null;
-    if (['pull_request', 'pull_request_target'].includes(process.env.GITHUB_EVENT_NAME) && process.env.GITHUB_EVENT_PATH) {
-      const eventData = JSON.parse(fs.readFileSync(process.env.GITHUB_EVENT_PATH, 'utf8'));
-      prNumber = eventData.pull_request?.number;
-    }
-
-    const authHeader = `Basic ${Buffer.from(SONAR_TOKEN + ':').toString('base64')}`;
-    const prParam = prNumber ? `&pullRequest=${prNumber}` : '';
-    const statusUrl = `https://sonarcloud.io/api/qualitygates/project_status?projectKey=${projectKey}${prParam}`;
-
-    // Smart Polling Mechanism
-    let attempts = 0;
-    const maxAttempts = 15; // Max 75 seconds (15 * 5s)
-    let isPending = true;
-
-    console.log('Polling SonarCloud for analysis results (waiting for processing)...');
-
-    while (isPending && attempts < maxAttempts) {
-      attempts++;
-      console.log(`  Attempt ${attempts}/${maxAttempts}: Checking Quality Gate status...`);
-
-      try {
-        const response = await fetch(statusUrl, { headers: { 'Authorization': authHeader } });
-        if (response.ok) {
-          const data = await response.json();
-          // Status 'NONE' means SonarCloud is still processing the background task
-          if (data.projectStatus && data.projectStatus.status !== 'NONE') {
-            sonarReport.passed = data.projectStatus.status === 'OK';
-            console.log(`SonarCloud Status Ready: ${data.projectStatus.status}`);
-            isPending = false;
-            break;
-          } else {
-            console.log(`  > SonarCloud is still calculating... (Status: ${data.projectStatus?.status || 'NONE'})`);
-          }
-        }
-      } catch (e) {
-        console.warn(`  ! Polling attempt ${attempts} failed: ${e.message}`);
-      }
-
-      if (isPending) {
-        await new Promise(resolve => setTimeout(resolve, 5000));
-      }
-    }
-
-    if (isPending) {
-      console.warn('Warning: SonarCloud status is still pending or unreachable after polling.');
-    }
-
-    // Metrics Fetch
-    const metricsUrl = `https://sonarcloud.io/api/measures/component?component=${projectKey}${prParam}&metricKeys=bugs,vulnerabilities,code_smells,security_hotspots`;
-    const metricsResponse = await fetch(metricsUrl, { headers: { 'Authorization': authHeader } });
-    if (metricsResponse.ok) {
-      const metricsData = await metricsResponse.json();
-      if (metricsData.component?.measures) {
-        metricsData.component.measures.forEach(m => {
-          if (m.metric === 'bugs') sonarReport.metrics.bugs = m.value;
-          if (m.metric === 'vulnerabilities') sonarReport.metrics.vulnerabilities = m.value;
-          if (m.metric === 'code_smells') sonarReport.metrics.code_smells = m.value;
-          if (m.metric === 'security_hotspots') sonarReport.metrics.security_hotspots = m.value;
-        });
-      }
-    }
-
-    // Issues Fetch (If not passed)
-    if (!sonarReport.passed) {
-      const issuesUrl = `https://sonarcloud.io/api/issues/search?componentKeys=${projectKey}${prParam}&resolved=false&ps=10`;
-      const issuesResponse = await fetch(issuesUrl, { headers: { 'Authorization': authHeader } });
-      if (issuesResponse.ok) {
-        const issuesData = await issuesResponse.json();
-        sonarReport.issues = issuesData.issues || [];
-      }
-    }
-
-    return sonarReport;
-  } catch (error) {
-    console.error('Error: SonarCloud fetch failed.', error.message);
-    return sonarReport;
-  }
 }
 
 async function analyzeSonarFailure(sonarReport) {
@@ -1044,61 +1000,17 @@ function getRelatedFiles(modifiedFiles) {
 }
 
 function runNpmAudit() {
-  console.log('\n--- Running NPM Audit ---');
-  let auditData;
-  const npmCmd = process.platform === 'win32' ? 'npm.cmd' : 'npm';
-
-  const result = safeExec(npmCmd, ['audit', '--json'], { shell: true });
-  const output = result.stdout || result.stderr;
-
-  const auditReport = {
-    critical: 0,
-    high: 0,
-    moderate: 0,
-    low: 0,
-    isSecure: null,
-    status: 'error',
-    details: []
-  };
-
+  const {evaluateAudit} = __nccwpck_require__(8056);
   try {
-    auditData = JSON.parse(output);
-  } catch (parseError) {
-    console.error('Error: Failed to parse npm audit output as JSON.', parseError.message);
-    return auditReport;
+    const npmCmd = process.platform === 'win32' ? 'npm.cmd' : 'npm';
+    const result = safeExec(npmCmd, ['audit', '--json'], {shell:true});
+    const data = JSON.parse(result.stdout || result.stderr);
+    if (result.status !== undefined && ![0,1].includes(result.status)) throw new Error('npm audit did not complete.');
+    const config = fs.existsSync(AUDIT_RESOLVE_FILE) ? JSON.parse(fs.readFileSync(AUDIT_RESOLVE_FILE,'utf8')) : {decisions:[]};
+    return evaluateAudit(data, config);
+  } catch {
+    return {status:'error', isSecure:null, critical:0, high:0, moderate:0, low:0, details:[], ignored:[], warnings:[], error:'Cannot read npm audit output or audit-resolve.json. Check the audit log and exception file.'};
   }
-
-  if (auditData?.vulnerabilities) {
-    auditReport.isSecure = true;
-    auditReport.status = 'complete';
-    try {
-      const auditResolveContent = fs.existsSync(AUDIT_RESOLVE_FILE) ? fs.readFileSync(AUDIT_RESOLVE_FILE, 'utf8') : '{"decisions":[]}';
-      const auditResolve = JSON.parse(auditResolveContent);
-      const ignoredIds = new Set(auditResolve.decisions.map(d => d.id));
-
-      Object.values(auditData.vulnerabilities).forEach(v => {
-        if (ignoredIds.has(v.id)) return;
-
-        if (v.severity === 'critical') auditReport.critical++;
-        else if (v.severity === 'high') auditReport.high++;
-        else if (v.severity === 'moderate') auditReport.moderate++;
-        else if (v.severity === 'low') auditReport.low++;
-
-        auditReport.details.push(`${v.name} (${v.severity})`);
-      });
-
-      // Overall security status: Vulnerable if there are ANY unignored high or critical vulnerabilities
-      if (auditReport.critical > 0 || auditReport.high > 0) {
-        auditReport.isSecure = false;
-      }
-    } catch (resolveError) {
-      auditReport.isSecure = null;
-      auditReport.status = 'error';
-      console.error('Error: Failed to process audit exceptions.', resolveError.message);
-    }
-  }
-
-  return auditReport;
 }
 
 /**
@@ -1509,17 +1421,17 @@ async function run() {
     }
 
     // --- Report / Fetch Stage ---
-    summary.sonar = await fetchSonarCloudResults();
+    summary.sonar = await reportSonar(summary.head);
 
     // AI Step: Analyze Sonar failures if any
-    if (!summary.sonar.passed && summary.sonar.issues.length > 0) {
+    if (summary.sonar && !summary.sonar.passed && summary.sonar.issues?.length > 0) {
       summary.sonarAnalysis = await analyzeSonarFailure(summary.sonar);
     }
 
     summary.success = summary.jestPassed &&
                       summary.coverageMet &&
                       summary.audit.isSecure &&
-                      (summary.sonar?.passed !== false);
+                      (!summary.sonar || summary.sonar.passed === true);
 
     summary.aiErrors = [...new Set([...(summary.aiErrors || []), ...aiErrors])];
     if (summary.aiErrors.length) {
@@ -1605,19 +1517,11 @@ async function persistGenerated(head,files,passed) {
 }
 
 async function reportSonar(head) {
+  if (!SONAR_ENABLED) return null;
   const projectKey = core.getInput('sonar_project_key');
   if (projectKey) return readSonarResults({token: SONAR_TOKEN, projectKey,
     scanStatus: core.getInput('sonar_scan_status'), head, prNumber: github.context.payload.pull_request?.number});
-  if (!SONAR_TOKEN) return null;
-  // Compatibility with installed workflows predating the isolated sonar job.
-  const repository = `${github.context.repo.owner}/${github.context.repo.repo}`;
-  try {
-    const blob = await githubAPI()(`/repos/${repository}/contents/sonar-project.properties?ref=${head}`);
-    const key = Buffer.from(blob.content, 'base64').toString('utf8').match(/^sonar.projectKey=([A-Za-z0-9_.:-]+)\s*$/m)?.[1];
-    if (!key) throw new Error();
-    fs.writeFileSync('sonar-project.properties', `sonar.projectKey=${key}\n`);
-    return await fetchSonarCloudResults();
-  } catch { return {passed: null, status: 'unavailable', error: 'Cannot read SonarCloud project configuration.'}; }
+  return {passed:null, status:'unavailable', issues:[], error:'SonarCloud is enabled but sonar_project_key is missing. Update the workflow configuration.'};
 }
 
 function qualityFailure(framework, summary) {
@@ -2048,7 +1952,7 @@ ${summary.testNote || (generated ? '📦 ไฟล์เทสต์ที่ Ac
 
   const audit = summary.audit;
   const complete = audit.status === 'complete';
-  const status = complete ? audit.isSecure ? '✅ ไม่พบ High / Critical' : '❌ พบความเสี่ยงที่ต้องตรวจสอบ' : '⚠️ ตรวจไม่สำเร็จ';
+  const status = complete ? audit.isSecure ? (audit.ignored?.length ? '✅ ไม่มี High / Critical ที่ยังไม่ยกเว้น' : '✅ ไม่พบ High / Critical') : '❌ พบความเสี่ยงที่ต้องตรวจสอบ' : '⚠️ ตรวจไม่สำเร็จ';
   const securityBody = `## 🛡️ Automated Quality Gate · Security Audit
 
 > **${status}**
@@ -2067,7 +1971,14 @@ ${complete ? (audit.details || []).length ? audit.details.map(x => '- ' + safe(x
 
 ---
 
-**เกณฑ์ตรวจ:** High หรือ Critical ทำให้ผล audit ไม่ผ่าน
+${audit.error ? 'ข้อผิดพลาด: ' + safe(audit.error) : ''}
+${audit.warnings?.length ? audit.warnings.map(x => '- ' + safe(x)).join('\n') : ''}
+
+### รายการที่ผู้ใช้ยอมรับความเสี่ยง
+
+${audit.ignored?.length ? audit.ignored.map(x => '- ' + safe(x)).join('\n') : 'ไม่มีรายการยกเว้น'}
+
+**เกณฑ์ตรวจ:** High หรือ Critical ที่ยังไม่ยกเว้นทำให้ผล audit ไม่ผ่าน ตัวเลขด้านบนไม่นับรายการที่ยกเว้น การยกเว้นไม่ได้แก้ช่องโหว่
 
 ${summary.sonarDetails || sonarDetails(summary.sonar, safe, label)}`;
 

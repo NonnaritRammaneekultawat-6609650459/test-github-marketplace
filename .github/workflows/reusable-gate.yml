@@ -11,8 +11,16 @@ on:
       sonar_enabled:
         description: 'Enable SonarCloud scan'
         required: false
-        default: true
+        default: false
         type: boolean
+      sonar_project_key:
+        description: 'Your SonarCloud project key (required when enabled)'
+        type: string
+        default: ''
+      sonar_organization:
+        description: 'Your SonarCloud organization (required when enabled)'
+        type: string
+        default: ''
     secrets:
       GEMINI_API_KEY:
         required: true
@@ -51,16 +59,33 @@ jobs:
             npm install
           fi
 
+      - name: Prepare Sonar metadata directory
+        if: ${{ inputs.sonar_enabled }}
+        run: mkdir -p "$GITHUB_WORKSPACE/.aq-sonar"
+
       - name: SonarCloud Scan
-        if: ${{ inputs.sonar_enabled && secrets.SONAR_TOKEN != '' }}
+        id: sonar
+        if: ${{ inputs.sonar_enabled }}
         uses: sonarsource/sonarqube-scan-action@v6
+        with:
+          args: >-
+            -Dproject.settings=/dev/null
+            -Dsonar.host.url=https://sonarcloud.io
+            -Dsonar.projectKey=${{ inputs.sonar_project_key }}
+            -Dsonar.organization=${{ inputs.sonar_organization }}
+            -Dsonar.sources=src
+            -Dsonar.scanner.metadataFilePath=${{ github.workspace }}/.aq-sonar/report-task.txt
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN || github.token }}
           SONAR_TOKEN: ${{ secrets.SONAR_TOKEN }}
 
       - name: Run Automated Quality Gate
+        if: always()
         uses: NonnaritRammaneekultawat-6609650459/test-github-marketplace@main
         with:
           gemini_api_key: ${{ secrets.GEMINI_API_KEY }}
-          sonar_token: ${{ secrets.SONAR_TOKEN }}
+          sonar_project_key: ${{ inputs.sonar_project_key }}
+          sonar_scan_status: ${{ steps.sonar.outcome }}
+          sonar_enabled: ${{ inputs.sonar_enabled }}
+          sonar_token: ${{ inputs.sonar_enabled && secrets.SONAR_TOKEN || '' }}
           github_token: ${{ secrets.GITHUB_TOKEN || github.token }}

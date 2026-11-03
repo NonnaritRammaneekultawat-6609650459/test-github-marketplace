@@ -330,3 +330,41 @@ Tests ใช้ทั้ง mocks และ fixture ที่รันจริ�
 - [การตั้งค่า AI และขอบเขต API](docs/ai-providers.md)
 - [โครงสร้าง Action](docs/structure.md)
 - [บันทึก workflow AngularJS รุ่นก่อน](docs/angularjs.md)
+
+## เปิด SonarCloud อย่างชัดเจน
+
+Action รุ่นนี้ใช้ SonarCloud เฉพาะเมื่อ sonar_enabled=true เท่านั้น ค่าเริ่มต้นคือ false แม้มี SONAR_TOKEN หรือ sonar-project.properties ก็ไม่เปิดเอง และไม่มีค่า Project key / Organization ของผู้พัฒนาเป็นค่าเริ่มต้น
+
+เมื่อเปิด ต้องส่ง sonar_project_key, sonar_token, sonar_scan_status และ metadata ของ scan รอบนั้นใน .aq-sonar/report-task.txt ด้วย ไม่ดึงผลล่าสุดจากโปรเจกต์เก่ามาใช้แทน หากตั้งค่าไม่ครบจะรายงานว่ายืนยันผลไม่ได้
+
+เว็บสร้าง inputs เหล่านี้ให้เอง ส่วนผู้ที่ใช้ reusable-gate.yml ต้องส่ง sonar_enabled, sonar_project_key และ sonar_organization อย่างชัดเจน สำหรับ CI ของ repo Action นี้เอง ให้ตั้ง GitHub repository variables SONAR_ENABLED=true, SONAR_PROJECT_KEY และ SONAR_ORGANIZATION พร้อม Secret SONAR_TOKEN ก่อนเปิดใช้
+
+Workflow เก่าที่ pin commit เดิมจะไม่เปลี่ยนตาม ต้อง merge PR อัปเดตจากเว็บก่อน ใช้ workflow แบบแยก jobs ใน docs/examples เป็นหลักสำหรับการติดตั้งใหม่
+
+## ยกเว้นช่องโหว่จาก npm audit
+
+สร้าง audit-resolve.json ที่ root ของ **repo ผู้ใช้** (ตัวติดตั้งเว็บเพิ่มไฟล์ว่างให้ และไม่เขียนทับไฟล์เดิม):
+
+```json
+{
+  "decisions": [
+    {
+      "package": "ชื่อแพ็กเกจจาก npm audit",
+      "id": 1234567,
+      "reason": "เหตุผลที่ยอมรับความเสี่ยงชั่วคราว",
+      "expires": "2026-12-31"
+    }
+  ]
+}
+```
+
+เลข 1234567 เป็นตัวอย่าง ต้องแทนด้วยเลข source ของ advisory ใน vulnerabilities[ชื่อแพ็กเกจ].via จาก npm audit --json ไม่ใช่เลข CVE หรือเลขที่ตั้งเอง ใช้ชื่อแพ็กเกจจริง เช่น angular หรือ @scope/package ไม่รองรับ wildcard
+
+- ต้องตรงทั้ง package และ advisory id จึงยกเว้นได้ การเพิ่มช่องโหว่ใหม่ในแพ็กเกจเดิมยังทำให้ไม่ผ่าน
+- expires ใช้ YYYY-MM-DD โดยยกเว้นได้จนจบวันนั้นตาม UTC หลังจากนั้นจะนับช่องโหว่ตามปกติ
+- แพ็กเกจที่ได้รับผลทางอ้อมต้องยกเว้นแยกตามชื่อแพ็กเกจที่ npm รายงาน ใช้ advisory id ของต้นเหตุที่อ้างถึง หากระบุต้นเหตุไม่ได้จะไม่ยกเว้น
+- ข้อมูลไม่ครบหรือ JSON ไม่ถูกต้องจะรายงาน ERROR ไม่ถือว่าปลอดภัย ไฟล์รุ่นเก่าที่มีเพียง id ต้องปรับเพิ่ม package, reason และ expires
+- รายงานแสดงรายการยกเว้น เหตุผล วันหมดอายุ และรายการหมดอายุแยกจากช่องโหว่ที่ยังขวาง Quality Gate
+- การยกเว้นไม่ได้ซ่อมช่องโหว่ ไม่ทำให้การติดตั้ง dependency หรือเทสต์ที่ล้มเหลวผ่าน
+
+รันทดสอบส่วนนี้ด้วย npm run test:audit

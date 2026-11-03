@@ -10,7 +10,8 @@
     "test:sonar": "node --test tests/sonar.cjs",
     "test:setup": "npm ci --prefix lib/angularjs/tooling --ignore-scripts --no-audit --no-fund && npm ci --prefix tests/fixtures/angularjs --ignore-scripts --no-audit --no-fund",
     "gate": "node generate-tests.js",
-    "build": "ncc build generate-tests.js -o dist"
+    "build": "ncc build generate-tests.js -o dist",
+    "test:audit": "node --test tests/audit.cjs"
   },
   "keywords": [],
   "author": "",
