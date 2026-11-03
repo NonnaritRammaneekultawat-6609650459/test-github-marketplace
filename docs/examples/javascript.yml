@@ -21,7 +21,7 @@ jobs:
       pull-requests: read
     steps:
       - name: Generate tests and review without executing PR code
-        uses: NonnaritRammaneekultawat-6609650459/test-github-marketplace@eec005e1c762aa2c3064f1eb1cd3a8127adf3484
+        uses: NonnaritRammaneekultawat-6609650459/test-github-marketplace@01ca23df58505148ccceb59fc4e826bf1f8bbd56
         with:
           project_type: javascript
           test_source: generated
@@ -65,7 +65,7 @@ jobs:
           name: aq-generated-tests
           path: .aq-generated
       - name: Run tests and measure coverage without AI keys or write permissions
-        uses: NonnaritRammaneekultawat-6609650459/test-github-marketplace@eec005e1c762aa2c3064f1eb1cd3a8127adf3484
+        uses: NonnaritRammaneekultawat-6609650459/test-github-marketplace@01ca23df58505148ccceb59fc4e826bf1f8bbd56
         if: always()
         with:
           project_type: javascript
@@ -163,12 +163,13 @@ jobs:
           name: quality-gate-sonar
           path: .aq-sonar
       - name: Save tests to PR and publish results
-        uses: NonnaritRammaneekultawat-6609650459/test-github-marketplace@eec005e1c762aa2c3064f1eb1cd3a8127adf3484
+        uses: NonnaritRammaneekultawat-6609650459/test-github-marketplace@01ca23df58505148ccceb59fc4e826bf1f8bbd56
         with:
           project_type: javascript
           test_source: generated
           gemini_model: gemini-3.1-flash-lite
           phase: report
+          sonar_enabled: "true"
           github_token: ${{ github.token }}
           persist_tests: "true"
           report_only: "false"
