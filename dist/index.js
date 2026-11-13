@@ -807,6 +807,46 @@ module.exports = {evaluateAudit, validateExceptions};
 
 /***/ }),
 
+/***/ 2886:
+/***/ ((module) => {
+
+"use strict";
+
+
+// Lightweight source metric: one path plus each decision operator/keyword.
+// Strings and comments are blanked first so examples in text do not count.
+function cyclomaticComplexity(source) {
+  const code = String(source)
+    .replace(/(['"`])(?:\\.|(?!\1)[^\\])*?\1/g, m => ' '.repeat(m.length))
+    .replace(/\/\*[\s\S]*?\*\//g, m => ' '.repeat(m.length))
+    .replace(/(^|[^:])\/\/.*$/gm, m => ' '.repeat(m.length));
+  const decisions = code.match(/\b(?:if|for|while|case|catch)\b|&&|\|\||\?\?|\?(?!\.)/g) || [];
+  return 1 + decisions.length;
+}
+
+function measureFiles(files, readFile, config = {}) {
+  const limit = config.complexity?.global ?? 10;
+  const perFile = config.complexity?.files || {};
+  if (!Number.isInteger(limit) || limit < 1 || limit > 1000 || !perFile || typeof perFile !== 'object' || Array.isArray(perFile) || Object.values(perFile).some(n => !Number.isInteger(n) || n < 1 || n > 1000)) {
+    throw new Error('Invalid complexity configuration');
+  }
+  const results = {};
+  let passed = true;
+  for (const file of files) {
+    const actual = cyclomaticComplexity(readFile(file));
+    const required = perFile[file] ?? limit;
+    const pass = actual <= required;
+    results[file] = {actual, required, pass};
+    if (!pass) passed = false;
+  }
+  return {status: passed ? 'passed' : 'failed', required: limit, files: results};
+}
+
+module.exports = {cyclomaticComplexity, measureFiles};
+
+
+/***/ }),
+
 /***/ 7849:
 /***/ ((__unused_webpack_module, __unused_webpack_exports, __nccwpck_require__) => {
 
@@ -826,6 +866,7 @@ const {publishComments} = __nccwpck_require__(7958);
 const jsPhases = __nccwpck_require__(6974);
 const {publishTests,recordCheck,MARKER} = __nccwpck_require__(8484);
 const {readSonarResults} = __nccwpck_require__(7215);
+const {measureFiles} = __nccwpck_require__(2886);
 (__nccwpck_require__(8889).config)();
 
 // Configuration
@@ -1411,7 +1452,8 @@ async function run() {
         fs.writeFileSync(STATE_FILE, JSON.stringify(summary, null, 2));
 
         // BLOCKING: Exit with error if any local checks failed
-        const prepareSuccess = summary.jestPassed && summary.coverageMet && summary.audit.isSecure && !summary.aiErrors.length;
+        summary.complexity = measureFiles(summary.modifiedFiles, file => fs.readFileSync(file, 'utf8'), qgConfig);
+        const prepareSuccess = summary.jestPassed && summary.coverageMet && summary.complexity.status === 'passed' && summary.audit.isSecure && !summary.aiErrors.length;
         if (!prepareSuccess) {
           console.error('--- Quality Gate (Prepare) FAILED ---');
           process.exit(1);
@@ -1430,6 +1472,7 @@ async function run() {
 
     summary.success = summary.jestPassed &&
                       summary.coverageMet &&
+                      summary.complexity?.status === 'passed' &&
                       summary.audit.isSecure &&
                       (!summary.sonar || summary.sonar.passed === true);
 
@@ -1455,6 +1498,10 @@ async function run() {
     console.log(`- Aggregate Statement Coverage: ${summary.coverage.statements}%`);
     console.log(`- Overall Target (AI Avg):     ${summary.coverage.required}%`);
     console.log(`- Coverage Status (AI Match):  ${summary.coverageMet ? 'PASS' : 'FAIL'}`);
+    console.log(`- Cyclomatic Complexity: ${summary.complexity?.status || 'UNAVAILABLE'} (max ${summary.complexity?.required ?? '—'})`);
+    for (const [file, metric] of Object.entries(summary.complexity?.files || {})) {
+      console.log(`  ${metric.pass ? '[PASS]' : '[FAIL]'} ${file}: ${metric.actual} / ${metric.required}`);
+    }
 
     console.log('\n--- Per-File AI Quality Gate ---');
     Object.keys(summary.fileStatus || {}).forEach(file => {
@@ -1555,7 +1602,7 @@ async function runJavaScriptPhases() {
     summary.modifiedFiles=data.modifiedFiles;
     summary.testsGenerated=Object.keys(data.files).length;
     summary.aiErrors=[...(data.aiErrors || []),...(summary.aiErrors || [])];
-    summary.success=summary.success===true && summary.tests?.status==='passed' && summary.tests.total>0 && summary.coverageMet===true && summary.audit?.isSecure===true && !summary.aiErrors.length && Object.values(data.classifications).every(c=>c.review?.status==='clean');
+    summary.success=summary.success===true && summary.tests?.status==='passed' && summary.tests.total>0 && summary.coverageMet===true && summary.complexity?.status==='passed' && summary.audit?.isSecure===true && !summary.aiErrors.length && Object.values(data.classifications).every(c=>c.review?.status==='clean');
     summary.sonar = await reportSonar(head);
     if (summary.sonar && summary.sonar.passed !== true) summary.success = false;
     if (data.status==='generated') {
@@ -1699,6 +1746,7 @@ const {spawnSync} = __nccwpck_require__(1421);
 const {childEnvironment} = __nccwpck_require__(9329);
 const {jestResults} = __nccwpck_require__(8338);
 const {MARKER} = __nccwpck_require__(8484);
+const {measureFiles} = __nccwpck_require__(2886);
 const dir = '.aq-generated';
 const manifestPath = path.join(dir,'javascript.json');
 
@@ -1791,7 +1839,8 @@ function checks(head,installStatus,audit) {
       summary.fileStatus[file]={actual,required,pass};
       if (!pass) summary.coverageMet=false;
     }
-    summary.success=summary.jestPassed && summary.coverageMet && summary.audit.isSecure===true && !summary.aiErrors.length && Object.values(data.classifications).every(c=>c.review?.status==='clean');
+    summary.complexity=measureFiles(data.modifiedFiles, file => fs.readFileSync(file,'utf8'), data.config);
+    summary.success=summary.jestPassed && summary.coverageMet && summary.complexity.status==='passed' && summary.audit.isSecure===true && !summary.aiErrors.length && Object.values(data.classifications).every(c=>c.review?.status==='clean');
   } catch (error) { summary.aiErrors.push('Checks incomplete: '+error.message); }
   finally { fs.writeFileSync('.gate-state.json',JSON.stringify(summary,null,2)); }
   return summary;
@@ -2056,6 +2105,10 @@ function renderJavaScriptComments(source, model, head) {
     summary.files.map(f => { const c=source.classifications?.[f]; const s=measured ? source.fileStatus?.[f] : undefined;
       return `| ${cell(f)} | ${cell(c?.importance || '—')} | ${c?.targetCoverage ?? c?.min_coverage_threshold ?? '—'}% | ${s?.actual ?? '—'}% | ${label(s ? s.pass ? 'passed' : 'failed' : 'unavailable')} |`;
     }).join('\n');
+  summary.complexity = source.complexity || {status:'unavailable', files:{}};
+  summary.complexityDetails = '\n### Cyclomatic complexity\n\n| File | Complexity | Limit | Status |\n|---|---:|---:|---|\n' +
+    Object.entries(summary.complexity.files || {}).map(([file, metric]) => `| ${cell(file)} | ${metric.actual} | ${metric.required} | ${label(metric.pass ? 'passed' : 'failed')} |`).join('\n');
+  summary.coverageDetails += summary.complexityDetails;
   summary.sonarDetails = sonarDetails(source.sonar, safe, label);
   const reviews = summary.files.map(f=>({file:f,...source.classifications?.[f]?.review}));
   summary.ai.status = source.skipped || source.reviewSkipped ? 'skipped' : ['buggy','suspicious','unavailable'].find(status => reviews.some(r => (r.status || 'unavailable') === status)) || (reviews.length ? 'clean' : 'unavailable');
