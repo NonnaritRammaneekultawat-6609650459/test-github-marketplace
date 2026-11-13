@@ -1602,6 +1602,9 @@ async function runJavaScriptPhases() {
     summary.modifiedFiles=data.modifiedFiles;
     summary.testsGenerated=Object.keys(data.files).length;
     summary.aiErrors=[...(data.aiErrors || []),...(summary.aiErrors || [])];
+    if (!summary.complexity || !Object.keys(summary.complexity.files || {}).length) {
+      summary.complexity=measureFiles(data.modifiedFiles, file => fs.readFileSync(file,'utf8'), qgConfig);
+    }
     summary.success=summary.success===true && summary.tests?.status==='passed' && summary.tests.total>0 && summary.coverageMet===true && summary.complexity?.status==='passed' && summary.audit?.isSecure===true && !summary.aiErrors.length && Object.values(data.classifications).every(c=>c.review?.status==='clean');
     summary.sonar = await reportSonar(head);
     if (summary.sonar && summary.sonar.passed !== true) summary.success = false;
@@ -2107,7 +2110,9 @@ function renderJavaScriptComments(source, model, head) {
     }).join('\n');
   summary.complexity = source.complexity || {status:'unavailable', files:{}};
   summary.complexityDetails = '\n### Cyclomatic complexity\n\n| File | Complexity | Limit | Status |\n|---|---:|---:|---|\n' +
-    Object.entries(summary.complexity.files || {}).map(([file, metric]) => `| ${cell(file)} | ${metric.actual} | ${metric.required} | ${label(metric.pass ? 'passed' : 'failed')} |`).join('\n');
+    (Object.entries(summary.complexity.files || {}).length
+      ? Object.entries(summary.complexity.files).map(([file, metric]) => `| ${cell(file)} | ${metric.actual} | ${metric.required} | ${label(metric.pass ? 'passed' : 'failed')} |`).join('\n')
+      : `| No source files measured | — | ${summary.complexity.required ?? '—'} | ${label(summary.complexity.status || 'unavailable')} |`);
   summary.coverageDetails += summary.complexityDetails;
   summary.sonarDetails = sonarDetails(source.sonar, safe, label);
   const reviews = summary.files.map(f=>({file:f,...source.classifications?.[f]?.review}));
