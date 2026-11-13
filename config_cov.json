@@ -1,5 +1,9 @@
 {
   "global": 80,
+  "complexity": {
+    "global": 10,
+    "files": {}
+  },
   "files": {
     "src/math.js": 50,
     "src/utility.js": 50,
