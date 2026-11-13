@@ -24,6 +24,7 @@
   "dependencies": {
     "@actions/core": "^1.11.1",
     "@actions/github": "^6.0.1",
+    "@babel/parser": "^7.29.11",
     "@google/generative-ai": "^0.24.1",
     "dotenv": "^17.4.2"
   }
