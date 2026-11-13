@@ -2081,6 +2081,7 @@ ${meta}
 | Coverage | ${coverageLabel} |
 ${caseTable}
 ${summary.coverageDetails || ''}
+${summary.aiInlineDetails ? '\n### 🤖 AI Code Review · per file\n\n' + summary.aiInlineDetails : ''}
 ${coverageMeasured && summary.coverage?.metrics ? '\n| Coverage | ผลจริง |\n|---|---|\n' + ['statements','branches','functions','lines'].map(k=>'| '+k+' | '+summary.coverage.metrics[k].pct+'% |').join('\n') : ''}
 ${coverageMeasured && summary.coverage?.files ? '\n| ไฟล์ | Statements | เกณฑ์เฉพาะไฟล์ |\n|---|---|---|\n' + Object.entries(summary.coverage.files).slice(0,20).map(([name,data])=>'| '+cell(name)+' | '+cell(data.statements?.pct)+'% | '+cell(summary.coverage.fileThresholds?.[name] ?? '—')+' |').join('\n') : ''}
 ${summary.persistence ? '\n**ไฟล์เทสต์ใน PR:** '+safe(summary.persistence)+'\n' : ''}
@@ -2240,6 +2241,14 @@ function renderJavaScriptComments(source, model, head) {
     `#### 🛠️ แนวทางแก้ไข\n\n> **คำอธิบาย / ตัวอย่าง**\n>\n${quoteText(r.remediation, 'ไม่มีแนวทางแก้ไขเพิ่มเติม')}\n\n---`).join('\n\n') +
     (source.analysis ? '\n\n### Test failure analysis\n\n' + safe(source.analysis) : '') +
     (source.sonarAnalysis ? '\n\n### SonarCloud analysis\n\n' + safe(source.sonarAnalysis) : '');
+  const compactReview = value => {
+    const text = String(value || '—').replace(/\s+/g,' ').trim();
+    return cell(text.length > 360 ? text.slice(0,357) + '…' : text);
+  };
+  summary.aiInlineDetails = reviews.length
+    ? '| File | Review | Finding | Suggested fix |\n|---|---|---|---|\n' + reviews.map(r =>
+      `| ${cell(r.file)} | ${reviewLabel(r.status || 'unavailable')} | ${compactReview(r.findings)} | ${compactReview(r.remediation)} |`).join('\n')
+    : `> ${reviewLabel(summary.ai.status)} · ${compactReview(summary.ai.findings)}`;
   return renderComments(summary, model);
 }
 
