@@ -2146,6 +2146,14 @@ function renderJavaScriptComments(source, model, head) {
     `#### 🛠️ แนวทางแก้ไข\n\n${r.remediation ? safe(r.remediation) : '_ไม่มีแนวทางแก้ไขเพิ่มเติม_'}\n\n---`).join('\n\n') +
     (source.analysis ? '\n\n### วิเคราะห์เทสต์ที่ไม่ผ่าน\n\n' + safe(source.analysis) : '') +
     (source.sonarAnalysis ? '\n\n### คำแนะนำจากผล SonarCloud\n\n' + safe(source.sonarAnalysis) : '');
+  const quoteText = value => safe(value).split(/\r?\n/).map(line => `> ${line}`).join('\n');
+  summary.aiDetails = reviews.map(r => `### 📄 ${cell(r.file)}\n\n` +
+    `> ┌─ **FILE REVIEW · ${reviewLabel(r.status || 'unavailable')}** ───────────\n` +
+    `> └────────────────────────────────────────\n\n` +
+    `#### 🔎 ข้อค้นพบ\n\n> **คำอธิบาย**\n>\n${quoteText(r.findings || 'ไม่มีรายละเอียดข้อค้นพบ')}\n\n` +
+    `#### 🛠️ แนวทางแก้ไข\n\n> **คำอธิบาย / ตัวอย่าง**\n>\n${quoteText(r.remediation || 'ไม่มีแนวทางแก้ไขเพิ่มเติม')}\n\n---`).join('\n\n') +
+    (source.analysis ? '\n\n### Test failure analysis\n\n' + safe(source.analysis) : '') +
+    (source.sonarAnalysis ? '\n\n### SonarCloud analysis\n\n' + safe(source.sonarAnalysis) : '');
   return renderComments(summary, model);
 }
 
