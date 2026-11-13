@@ -1834,6 +1834,7 @@ run().catch(error => core.setFailed(`Quality Gate failed (${error.name || 'Error
 const fs = __nccwpck_require__(3024);
 const path = __nccwpck_require__(6760);
 const vm = __nccwpck_require__(714);
+const parser = __nccwpck_require__(5429);
 const {createHash} = __nccwpck_require__(7598);
 const {spawnSync} = __nccwpck_require__(1421);
 const {childEnvironment} = __nccwpck_require__(9329);
@@ -1842,6 +1843,34 @@ const {MARKER} = __nccwpck_require__(8484);
 const {measureFiles} = __nccwpck_require__(2886);
 const dir = '.aq-generated';
 const manifestPath = path.join(dir,'javascript.json');
+
+function fixSourceImportPaths(testCode, testPath, sourcePath) {
+  const ast = parser.parse(testCode,{sourceType:'unambiguous',plugins:['jsx']});
+  const expected = path.posix.relative(path.posix.dirname(testPath),sourcePath).replace(/\.js$/,'');
+  const sourceBase = path.posix.basename(sourcePath,'.js');
+  const edits = [];
+  function visit(node) {
+    if (!node || typeof node !== 'object') return;
+    let specifier = null;
+    if (['ImportDeclaration','ExportNamedDeclaration','ExportAllDeclaration'].includes(node.type)) specifier=node.source;
+    else if (node.type === 'CallExpression' && (node.callee?.type === 'Import' || node.callee?.type === 'Identifier' && node.callee.name === 'require')) specifier=node.arguments?.[0];
+    else if (node.type === 'ImportExpression') specifier=node.source;
+    if (specifier?.type === 'StringLiteral' && specifier.value.startsWith('.') && specifier.value !== expected && path.posix.basename(specifier.value.replace(/\.js$/,'')) === sourceBase) {
+      edits.push({start:specifier.start+1,end:specifier.end-1,value:expected});
+    }
+    for (const [key,value] of Object.entries(node)) {
+      if (['loc','start','end','tokens','comments'].includes(key)) continue;
+      if (value && typeof value === 'object') {
+        if (Array.isArray(value)) value.forEach(visit);
+        else if (typeof value.type === 'string') visit(value);
+      }
+    }
+  }
+  visit(ast.program);
+  for (const edit of edits.sort((a,b)=>b.start-a.start)) testCode=testCode.slice(0,edit.start)+edit.value+testCode.slice(edit.end);
+  if (edits.length) console.warn(`Corrected ${edits.length} generated test import path(s) for ${sourcePath}.`);
+  return testCode;
+}
 
 function read(head) {
   if (fs.statSync(manifestPath).size > 2*1024*1024) throw new Error('Oversized generation artifact');
@@ -1876,6 +1905,7 @@ async function generate({api,repository,head,files,classify,generateText,templat
         .replaceAll('{{code}}',code).replace('{{classification}}',JSON.stringify(classification))
         .replace('{{spec_context}}','').replace('{{target_coverage}}',String(classification.targetCoverage));
       let text = (await generateText(prompt)).trim().replace(/^```(?:javascript|js)?\s*\n?/,'').replace(/\n?```$/,'');
+      text = fixSourceImportPaths(text,name,file.filename);
       new vm.Script(text); // Parse, never execute with AI credentials.
       if (!/\b(test|it|describe)(?:\.(each|only|skip))?\s*\(/.test(text)) throw new Error('AI output has no Jest tests');
       data.files[name]=MARKER+text+'\n';
@@ -1945,7 +1975,7 @@ function state(head) {
   if (data.head!==head || data.framework!=='javascript') throw new Error('Check artifact belongs to a different commit');
   return data;
 }
-module.exports={generate,checks,read,state};
+module.exports={generate,checks,read,state,fixSourceImportPaths};
 
 
 /***/ }),
