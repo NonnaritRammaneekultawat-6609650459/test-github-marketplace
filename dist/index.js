@@ -1448,11 +1448,11 @@ async function run() {
 
       if (mode === 'prepare') {
         summary.aiErrors = [...new Set(aiErrors)];
+        summary.complexity = measureFiles(summary.modifiedFiles, file => fs.readFileSync(file, 'utf8'), qgConfig);
         console.log('--- Saving state and exiting prepare mode ---');
         fs.writeFileSync(STATE_FILE, JSON.stringify(summary, null, 2));
 
         // BLOCKING: Exit with error if any local checks failed
-        summary.complexity = measureFiles(summary.modifiedFiles, file => fs.readFileSync(file, 'utf8'), qgConfig);
         const prepareSuccess = summary.jestPassed && summary.coverageMet && summary.complexity.status === 'passed' && summary.audit.isSecure && !summary.aiErrors.length;
         if (!prepareSuccess) {
           console.error('--- Quality Gate (Prepare) FAILED ---');
@@ -1463,6 +1463,11 @@ async function run() {
     }
 
     // --- Report / Fetch Stage ---
+    // The legacy `all` flow skips the isolated prepare branch above, so measure
+    // complexity here as well. Older prepare artifacts may also lack this field.
+    if (!summary.complexity || !Object.keys(summary.complexity.files || {}).length) {
+      summary.complexity = measureFiles(summary.modifiedFiles || [], file => fs.readFileSync(file, 'utf8'), qgConfig);
+    }
     summary.sonar = await reportSonar(summary.head);
 
     // AI Step: Analyze Sonar failures if any
