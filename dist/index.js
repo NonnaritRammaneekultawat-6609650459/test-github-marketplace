@@ -2109,10 +2109,19 @@ function renderJavaScriptComments(source, model, head) {
       return `| ${cell(f)} | ${cell(c?.importance || '—')} | ${c?.targetCoverage ?? c?.min_coverage_threshold ?? '—'}% | ${s?.actual ?? '—'}% | ${label(s ? s.pass ? 'passed' : 'failed' : 'unavailable')} |`;
     }).join('\n');
   summary.complexity = source.complexity || {status:'unavailable', files:{}};
-  summary.complexityDetails = '\n### Cyclomatic complexity\n\n| File | Complexity | Limit | Status |\n|---|---:|---:|---|\n' +
-    (Object.entries(summary.complexity.files || {}).length
-      ? Object.entries(summary.complexity.files).map(([file, metric]) => `| ${cell(file)} | ${metric.actual} | ${metric.required} | ${label(metric.pass ? 'passed' : 'failed')} |`).join('\n')
-      : `| No source files measured | — | ${summary.complexity.required ?? '—'} | ${label(summary.complexity.status || 'unavailable')} |`);
+  const complexityFiles = Object.entries(summary.complexity.files || {});
+  const complexityStatus = complexityFiles.length ? summary.complexity.status || 'unavailable' : 'unavailable';
+  const complexityBadge = complexityStatus === 'passed' ? '🟢 PASS'
+    : complexityStatus === 'failed' ? '🔴 FAIL' : '🟡 UNAVAILABLE';
+  const complexityRows = complexityFiles.length
+    ? complexityFiles.map(([file, metric]) => `| ${cell(file)} | **${metric.actual}** | ${metric.required} | ${metric.pass ? '🟢 PASS' : '🔴 FAIL'} |`).join('\n')
+    : `| No source files measured | — | ${summary.complexity.required ?? '—'} | 🟡 UNAVAILABLE |`;
+  summary.complexityDetails = `\n### 🧭 Cyclomatic complexity\n\n` +
+    `> ┌─ **COMPLEXITY GATE** ─────────────────────\n` +
+    `> │ **${complexityBadge}** · ${complexityFiles.length} file(s) measured\n` +
+    `> │ Per-file limit: **${summary.complexity.required ?? '—'}** · Lower is better\n` +
+    `> └──────────────────────────────────────────\n\n` +
+    `| 🗂️ File | 🔀 Complexity | 🎯 Limit | Result |\n|---|---:|---:|---|\n${complexityRows}`;
   summary.coverageDetails += summary.complexityDetails;
   summary.sonarDetails = sonarDetails(source.sonar, safe, label);
   const reviews = summary.files.map(f=>({file:f,...source.classifications?.[f]?.review}));
