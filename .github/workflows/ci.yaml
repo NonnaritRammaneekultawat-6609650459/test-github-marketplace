@@ -2,65 +2,179 @@ name: Automated Quality Gate
 
 on:
   push:
-    branches: [ main ]
-  pull_request:
-    branches: [ main ]
+    branches: [main]
+  pull_request_target:
+    branches: [main]
+    types: [opened, synchronize, reopened, ready_for_review]
+
+permissions: {}
+concurrency:
+  group: quality-${{ github.workflow }}-${{ github.event.pull_request.number || github.sha }}
+  cancel-in-progress: true
 
 jobs:
-  quality-gate:
+  main-validation:
+    if: github.event_name == 'push'
     runs-on: ubuntu-latest
-    env:
-      FORCE_JAVASCRIPT_ACTIONS_TO_NODE24: true
-
     permissions:
       contents: read
-      pull-requests: write
-      statuses: write
-      checks: write
-
     steps:
-    - name: Checkout Code
-      uses: actions/checkout@v5
-      with:
-        fetch-depth: 0 # Essential for git diff to work
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '24'
+          cache: npm
+      - run: npm ci
+      - run: npm test
+      - run: npm run build
 
-    - name: Set up Node.js
-      uses: actions/setup-node@v4
-      with:
-        node-version: '24'
-        cache: 'npm'
+  generate:
+    if: github.event_name == 'pull_request_target' && github.actor != 'github-actions[bot]' && github.actor != 'dependabot[bot]' && github.event.pull_request.head.repo.full_name == github.repository
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+      pull-requests: read
+    steps:
+      - name: Generate tests without running PR code
+        uses: NonnaritRammaneekultawat-6609650459/test-github-marketplace@main
+        with:
+          project_type: javascript
+          test_source: generated
+          phase: generate
+          gemini_api_key: ${{ secrets.GEMINI_API_KEY }}
+          github_token: ${{ github.token }}
+      - uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: aq-generated-tests
+          path: .aq-generated/
+          include-hidden-files: true
+          if-no-files-found: warn
+          retention-days: 7
 
-    - name: Install Dependencies
-      run: npm ci
+  checks:
+    needs: generate
+    if: always() && github.event_name == 'pull_request_target' && github.actor != 'github-actions[bot]' && github.actor != 'dependabot[bot]' && github.event.pull_request.head.repo.full_name == github.repository
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    permissions:
+      contents: read
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          repository: ${{ github.event.pull_request.head.repo.full_name }}
+          ref: ${{ github.event.pull_request.head.sha }}
+          persist-credentials: false
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '24'
+      - id: install
+        run: npm ci --ignore-scripts
+        continue-on-error: true
+      - uses: actions/download-artifact@v4
+        if: always()
+        continue-on-error: true
+        with:
+          name: aq-generated-tests
+          path: .aq-generated
+      - name: Run generated tests and measure coverage
+        uses: NonnaritRammaneekultawat-6609650459/test-github-marketplace@main
+        if: always()
+        with:
+          project_type: javascript
+          test_source: generated
+          phase: checks
+          install_status: ${{ steps.install.outcome }}
+      - uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: quality-gate-results
+          path: |
+            .gate-state.json
+            coverage/
+          include-hidden-files: true
+          if-no-files-found: warn
+          retention-days: 7
 
+  sonar:
+    needs: checks
+    if: always() && vars.SONAR_ENABLED == 'true' && github.event_name == 'pull_request_target' && github.event.pull_request.head.repo.full_name == github.repository
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: ${{ github.event.pull_request.head.sha }}
+          persist-credentials: false
+          fetch-depth: 0
+      - uses: actions/download-artifact@v4
+        if: always()
+        continue-on-error: true
+        with:
+          name: quality-gate-results
+          path: .
+      - name: SonarCloud Scan
+        id: sonar
+        uses: SonarSource/sonarqube-scan-action@v6
+        with:
+          args: >-
+            -Dproject.settings=/dev/null
+            -Dsonar.host.url=https://sonarcloud.io
+            -Dsonar.projectKey=${{ vars.SONAR_PROJECT_KEY }}
+            -Dsonar.organization=${{ vars.SONAR_ORGANIZATION }}
+            -Dsonar.sources=src
+            -Dsonar.javascript.lcov.reportPaths=coverage/lcov.info
+            -Dsonar.scanner.metadataFilePath=${{ github.workspace }}/.scannerwork/report-task.txt
+        env:
+          GITHUB_TOKEN: ${{ github.token }}
+          SONAR_TOKEN: ${{ secrets.SONAR_TOKEN }}
+      - uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: quality-gate-sonar
+          path: .scannerwork/report-task.txt
+          include-hidden-files: true
+          if-no-files-found: warn
+          retention-days: 7
 
-    - name: Prepare Sonar metadata directory
-      if: ${{ vars.SONAR_ENABLED == 'true' }}
-      run: mkdir -p "$GITHUB_WORKSPACE/.aq-sonar"
-
-    - name: SonarCloud Scan
-      id: sonar
-      if: ${{ vars.SONAR_ENABLED == 'true' }}
-      uses: sonarsource/sonarqube-scan-action@v6
-      with:
-        args: >-
-          -Dproject.settings=/dev/null
-          -Dsonar.host.url=https://sonarcloud.io
-          -Dsonar.projectKey=${{ vars.SONAR_PROJECT_KEY }}
-          -Dsonar.organization=${{ vars.SONAR_ORGANIZATION }}
-          -Dsonar.sources=src
-          -Dsonar.scanner.metadataFilePath=${{ github.workspace }}/.aq-sonar/report-task.txt
-      env:
-        GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
-        SONAR_TOKEN: ${{ secrets.SONAR_TOKEN }}
-
-    - name: Run Automated Quality Gate
-      if: always()
-      uses: ./
-      with:
-        gemini_api_key: ${{ secrets.GEMINI_API_KEY }}
-        sonar_project_key: ${{ vars.SONAR_PROJECT_KEY }}
-        sonar_scan_status: ${{ steps.sonar.outcome }}
-        sonar_enabled: ${{ vars.SONAR_ENABLED == 'true' }}
-        sonar_token: ${{ vars.SONAR_ENABLED == 'true' && secrets.SONAR_TOKEN || '' }}
-        github_token: ${{ secrets.GITHUB_TOKEN }}
+  report:
+    needs: [generate, checks, sonar]
+    if: always() && github.event_name == 'pull_request_target' && github.actor != 'github-actions[bot]' && github.actor != 'dependabot[bot]' && github.event.pull_request.head.repo.full_name == github.repository
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    permissions:
+      contents: write
+      pull-requests: write
+      checks: write
+    steps:
+      - uses: actions/download-artifact@v4
+        if: always()
+        continue-on-error: true
+        with:
+          name: aq-generated-tests
+          path: .aq-generated
+      - uses: actions/download-artifact@v4
+        if: always()
+        continue-on-error: true
+        with:
+          name: quality-gate-results
+          path: .
+      - uses: actions/download-artifact@v4
+        if: always() && vars.SONAR_ENABLED == 'true'
+        continue-on-error: true
+        with:
+          name: quality-gate-sonar
+          path: .aq-sonar
+      - name: Save generated tests to PR branch and publish report
+        uses: NonnaritRammaneekultawat-6609650459/test-github-marketplace@main
+        with:
+          project_type: javascript
+          test_source: generated
+          phase: report
+          persist_tests: 'true'
+          sonar_enabled: ${{ vars.SONAR_ENABLED == 'true' }}
+          sonar_project_key: ${{ vars.SONAR_PROJECT_KEY }}
+          sonar_scan_status: ${{ needs.sonar.result }}
+          sonar_token: ${{ vars.SONAR_ENABLED == 'true' && secrets.SONAR_TOKEN || '' }}
+          github_token: ${{ github.token }}
