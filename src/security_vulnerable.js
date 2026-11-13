@@ -29,4 +29,8 @@ function generateToken() {
   return crypto.randomBytes(16).toString('hex');
 }
 
-module.exports = { processInputInsecurely, runDiagnostic, generateToken };
+function hasDiagnosticInput(value) {
+  return typeof value === 'string' && value.trim().length > 0;
+}
+
+module.exports = { processInputInsecurely, runDiagnostic, generateToken, hasDiagnosticInput };
