@@ -1951,6 +1951,9 @@ You are an expert Senior QA Automation Engineer. Your task is to generate high-q
 const {safe, label} = __nccwpck_require__(9329);
 const {sonarDetails} = __nccwpck_require__(6038);
 const cell = value => safe(value).replace(/\|/g, '&#124;').replace(/\n/g, ' ');
+const statusIcon = status => ({passed:'🟢',failed:'🔴',clean:'🟢',buggy:'🔴',suspicious:'🟠',skipped:'⚪',unavailable:'🟡',error:'🟡'}[status] || '🟡');
+const statusPanel = (title, status, detail='') =>
+  `> ┌─ **${title}** ─────────────────────────\n> │ ${statusIcon(status)} **${String(status).toUpperCase()}**${detail ? ' · ' + detail : ''}\n> └────────────────────────────────────────`;
 
 function renderComments(summary, model) {
   const run = process.env.GITHUB_RUN_ID
@@ -1967,7 +1970,9 @@ function renderComments(summary, model) {
   const generated = summary.testOrigin === 'generated';
   const testBody = `## 🧪 Automated Quality Gate · Test Results
 
-> **${label(tests.status)}** — ${['unavailable','error'].includes(tests.status) ? 'ระบบตรวจทำงานไม่สำเร็จ ยังสรุปผลโค้ดไม่ได้' : tests.status === 'failed' ? 'เทสต์ไม่ผ่าน — ดูกรณีทดสอบที่ล้มเหลวด้านล่าง' : 'ผลการรันทดสอบจริง'}
+${statusPanel('TEST GATE', tests.status, `${count('passed')} passed · ${count('failed')} failed · ${count('skipped')} skipped`)}
+
+${['unavailable','error'].includes(tests.status) ? 'ระบบตรวจทำงานไม่สำเร็จ ยังสรุปผลโค้ดไม่ได้' : tests.status === 'failed' ? 'เทสต์ไม่ผ่าน — ดูกรณีทดสอบที่ล้มเหลวด้านล่าง' : 'ผลการรันทดสอบจริง'}
 
 ${meta}
 
@@ -2007,7 +2012,7 @@ ${summary.testNote || (generated ? '📦 ไฟล์เทสต์ที่ Ac
   const status = complete ? audit.isSecure ? (audit.ignored?.length ? '✅ ไม่มี High / Critical ที่ยังไม่ยกเว้น' : '✅ ไม่พบ High / Critical') : '❌ พบความเสี่ยงที่ต้องตรวจสอบ' : '⚠️ ตรวจไม่สำเร็จ';
   const securityBody = `## 🛡️ Automated Quality Gate · Security Audit
 
-> **${status}**
+${statusPanel('SECURITY AUDIT', complete ? audit.isSecure ? 'passed' : 'failed' : 'unavailable', 'npm audit · High/Critical block the gate')}
 
 ${meta}
 
@@ -2037,7 +2042,7 @@ ${summary.sonarDetails || sonarDetails(summary.sonar, safe, label)}`;
   const aiStatus = {clean:'✅ ไม่พบข้อบกพร่องจากการรีวิว',suspicious:'🟡 มีข้อสังเกต',buggy:'🔴 พบประเด็นที่ควรแก้ไข',unavailable:'⚠️ รีวิวไม่สำเร็จ',skipped:'⏭️ ข้ามการรีวิว'}[summary.ai.status] || '⚠️ ไม่มีผลรีวิว';
   const aiBody = `## 🤖 Automated Quality Gate · AI Code Review
 
-> **${aiStatus}**
+${statusPanel('AI CODE REVIEW', summary.ai.status, aiStatus)}
 
 ${meta}
 
@@ -2187,8 +2192,9 @@ function sonarStatus(sonar) {
 
 function sonarDetails(sonar, safe, label) {
   const status = sonarStatus(sonar);
+  const icon = ({passed:'🟢',failed:'🔴',skipped:'⚪',unavailable:'🟡'})[status] || '🟡';
   const cell = value => safe(value ?? '—').replace(/\|/g, '&#124;').replace(/\n/g, ' ');
-  return `### 📡 SonarCloud\n\n${label(status)}\n\n` +
+  return `### 📡 SonarCloud\n\n> ┌─ **SONARCLOUD** ─────────────────────────\n> │ ${icon} **${status.toUpperCase()}**\n> └────────────────────────────────────────\n\n` +
     (status === 'skipped' ? 'ไม่ได้เปิดใช้ SonarCloud ในการตรวจรอบนี้' :
       status === 'unavailable' ? 'สแกนไม่สำเร็จหรือยังยืนยันผลไม่ได้ จึงไม่ถือว่าผ่าน' :
         `Bugs: ${cell(sonar.metrics?.bugs)} · Vulnerabilities: ${cell(sonar.metrics?.vulnerabilities)} · Code smells: ${cell(sonar.metrics?.code_smells)}\n\nCoverage ทั้งโปรเจกต์: ${cell(sonar.metrics?.coverage)}% · โค้ดใหม่ใน PR: ${cell(sonar.metrics?.new_coverage)}%`) +
