@@ -2232,12 +2232,12 @@ function renderJavaScriptComments(source, model, head) {
     summary.errors.push(...new Set(source.aiErrors));
   }
   const reviewLabel = status => ({clean:'🟢 ผ่าน',suspicious:'🟠 ควรตรวจสอบ',buggy:'🔴 ควรแก้ไข',unavailable:'🟡 ไม่มีผลรีวิว'})[status] || '🟡 ไม่มีสถานะ';
-  const plainText = value => safe(value).replace(/\r?\n/g, '  \n');
+  const quoteText = (value, fallback) => safe(String(value ?? '').trim() || fallback).split(/\r?\n/).map(line => `> ${line}`).join('\n');
   summary.aiDetails = reviews.map(r => `### 📄 ${cell(r.file)}\n\n` +
     `> ┌─ **FILE REVIEW · ${reviewLabel(r.status || 'unavailable')}** ───────────\n` +
     `> └────────────────────────────────────────\n\n` +
-    `#### 🔎 ข้อค้นพบ\n\n**คำอธิบาย**\n\n${plainText(r.findings || 'ไม่มีรายละเอียดข้อค้นพบ')}\n\n` +
-    `#### 🛠️ แนวทางแก้ไข\n\n**คำอธิบาย / ตัวอย่าง**\n\n${plainText(r.remediation || 'ไม่มีแนวทางแก้ไขเพิ่มเติม')}\n\n---`).join('\n\n') +
+    `#### 🔎 ข้อค้นพบ\n\n> **คำอธิบาย**\n>\n${quoteText(r.findings, 'ไม่มีรายละเอียดข้อค้นพบ')}\n\n` +
+    `#### 🛠️ แนวทางแก้ไข\n\n> **คำอธิบาย / ตัวอย่าง**\n>\n${quoteText(r.remediation, 'ไม่มีแนวทางแก้ไขเพิ่มเติม')}\n\n---`).join('\n\n') +
     (source.analysis ? '\n\n### Test failure analysis\n\n' + safe(source.analysis) : '') +
     (source.sonarAnalysis ? '\n\n### SonarCloud analysis\n\n' + safe(source.sonarAnalysis) : '');
   return renderComments(summary, model);
