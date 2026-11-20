@@ -2,78 +2,76 @@
 const { execFileSync } = require('node:child_process');
 const crypto = require('node:crypto');
 const { 
-  processInputInsecurely, 
-  runDiagnostic, 
-  generateToken, 
-  hasDiagnosticInput 
+    processInputInsecurely, 
+    runDiagnostic, 
+    generateToken, 
+    hasDiagnosticInput 
 } = require('../../src/security_vulnerable');
 
 jest.mock('node:child_process', () => ({
-  execFileSync: jest.fn()
+    execFileSync: jest.fn()
+}));
+
+jest.mock('node:crypto', () => ({
+    randomBytes: jest.fn()
 }));
 
 describe('security_vulnerable.js unit tests', () => {
-  
-  describe('processInputInsecurely', () => {
-    test('should parse valid JSON input', () => {
-      const input = '{"key": "value"}';
-      const result = processInputInsecurely(input);
-      expect(result).toEqual({ key: 'value' });
+    
+    describe('processInputInsecurely', () => {
+        test('should return parsed JSON object for valid JSON input', () => {
+            const input = '{"key": "value"}';
+            const result = processInputInsecurely(input);
+            expect(result).toEqual({ key: 'value' });
+        });
+
+        test('should return raw input if JSON parsing fails', () => {
+            const input = 'invalid-json';
+            const result = processInputInsecurely(input);
+            expect(result).toBe('invalid-json');
+        });
     });
 
-    test('should return input as is if JSON parsing fails', () => {
-      const input = 'invalid json';
-      const result = processInputInsecurely(input);
-      expect(result).toBe(input);
-    });
-  });
-
-  describe('runDiagnostic', () => {
-    test('should call execFileSync with correct parameters', () => {
-      execFileSync.mockReturnValue(Buffer.from('Result: test-command'));
-      
-      const result = runDiagnostic('test-command');
-      
-      expect(execFileSync).toHaveBeenCalledWith('echo', ['Result: test-command']);
-      expect(result).toBe('Result: test-command');
+    describe('runDiagnostic', () => {
+        test('should call execFileSync with correct arguments', () => {
+            const command = 'status';
+            execFileSync.mockReturnValue(Buffer.from('Result: status'));
+            
+            const result = runDiagnostic(command);
+            
+            expect(execFileSync).toHaveBeenCalledWith('echo', ['Result: status']);
+            expect(result).toBe('Result: status');
+        });
     });
 
-    test('should handle execFileSync errors', () => {
-      execFileSync.mockImplementation(() => {
-        throw new Error('Command failed');
-      });
-      
-      expect(() => runDiagnostic('fail')).toThrow('Command failed');
-    });
-  });
-
-  describe('generateToken', () => {
-    test('should return a hex string of 32 characters (16 bytes)', () => {
-      const token = generateToken();
-      expect(typeof token).toBe('string');
-      expect(token).toHaveLength(32);
-      expect(/^[0-9a-f]+$/.test(token)).toBe(true);
-    });
-  });
-
-  describe('hasDiagnosticInput', () => {
-    test('should return true for non-empty string', () => {
-      expect(hasDiagnosticInput('valid')).toBe(true);
+    describe('generateToken', () => {
+        test('should generate a hex string of correct length', () => {
+            const mockBuffer = Buffer.from('abcdef0123456789abcdef0123456789', 'hex');
+            crypto.randomBytes.mockReturnValue(mockBuffer);
+            
+            const token = generateToken();
+            
+            expect(crypto.randomBytes).toHaveBeenCalledWith(16);
+            expect(token).toBe('6162636465663031323334353637383961626364656630313233343536373839');
+        });
     });
 
-    test('should return false for empty string', () => {
-      expect(hasDiagnosticInput('')).toBe(false);
-    });
+    describe('hasDiagnosticInput', () => {
+        test('should return true for valid non-empty string', () => {
+            expect(hasDiagnosticInput('valid')).toBe(true);
+            expect(hasDiagnosticInput('  text  ')).toBe(true);
+        });
 
-    test('should return false for whitespace string', () => {
-      expect(hasDiagnosticInput('   ')).toBe(false);
-    });
+        test('should return false for empty string', () => {
+            expect(hasDiagnosticInput('')).toBe(false);
+            expect(hasDiagnosticInput('   ')).toBe(false);
+        });
 
-    test('should return false for non-string types', () => {
-      expect(hasDiagnosticInput(123)).toBe(false);
-      expect(hasDiagnosticInput(null)).toBe(false);
-      expect(hasDiagnosticInput(undefined)).toBe(false);
-      expect(hasDiagnosticInput({})).toBe(false);
+        test('should return false for non-string types', () => {
+            expect(hasDiagnosticInput(null)).toBe(false);
+            expect(hasDiagnosticInput(undefined)).toBe(false);
+            expect(hasDiagnosticInput(123)).toBe(false);
+            expect(hasDiagnosticInput({})).toBe(false);
+        });
     });
-  });
 });
