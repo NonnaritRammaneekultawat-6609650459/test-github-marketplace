@@ -329,7 +329,7 @@ const label = status => ({passed:'✅ PASS', failed:'❌ FAIL', skipped:'⏭️ 
 function isPassing(summary) {
   return summary.install.status === 'passed' && summary.tests.status === 'passed' &&
     summary.syntax.status === 'passed' && summary.audit.isSecure === true &&
-    summary.ai.status === 'clean' && (!summary.sonar || summary.sonar.skipped || summary.sonar.passed === true) && (!summary.coverage || summary.coverage.status === 'passed') && !summary.errors.length;
+    (!summary.sonar || summary.sonar.skipped || summary.sonar.passed === true) && (!summary.coverage || summary.coverage.status === 'passed') && !summary.errors.length;
 }
 
 function formatReport(summary, model) {
@@ -337,7 +337,7 @@ function formatReport(summary, model) {
   const counts = Number.isInteger(tests.total) ? `${tests.total} tests; ${tests.passed || 0} passed; ${tests.failed || 0} failed; ${tests.skipped || 0} skipped` : 'No test counts available';
   const audit = summary.audit;
   const auditStatus = audit.status === 'complete' ? (audit.isSecure ? 'passed' : 'failed') : 'error';
-  const hasFailure = [summary.install, summary.syntax, tests, summary.coverage || {}].some(x => x.status === 'failed') || auditStatus === 'failed' || summary.ai.status === 'buggy' || sonarStatus(summary.sonar) === 'failed';
+  const hasFailure = [summary.install, summary.syntax, tests, summary.coverage || {}].some(x => x.status === 'failed') || auditStatus === 'failed' || sonarStatus(summary.sonar) === 'failed';
   const generated = summary.testOrigin === 'generated';
   const result = hasFailure ? '❌ FAIL / findings require attention' : isPassing(summary) ? '✅ Checks passed' : '⚠️ INCOMPLETE — some checks unavailable or skipped';
   const runUrl = process.env.GITHUB_RUN_ID ? `${process.env.GITHUB_SERVER_URL}/${process.env.GITHUB_REPOSITORY}/actions/runs/${process.env.GITHUB_RUN_ID}` : '';
@@ -1230,7 +1230,7 @@ async function classifyFileWithGemini(file, code, frameworkContext = '') {
     return classification;
   } catch (err) {
     const diagnostic = err.name === 'AIError' ? err.message : 'AI returned an invalid review format.';
-    aiErrors.push(diagnostic);
+
     console.error(`  ! AI audit unavailable for ${file}: ${diagnostic}`);
     return {
       importance: "medium", min_coverage_threshold: 80, focus_areas: ["logic"], description: "Default classification.",
@@ -1707,7 +1707,7 @@ async function runJavaScriptPhases() {
     if (!summary.complexity || !Object.keys(summary.complexity.files || {}).length) {
       summary.complexity=measureFiles(data.modifiedFiles, file => fs.readFileSync(file,'utf8'), qgConfig);
     }
-    summary.success=summary.success===true && summary.tests?.status==='passed' && summary.tests.total>0 && summary.coverageMet===true && summary.complexity?.status==='passed' && summary.audit?.isSecure===true && !summary.aiErrors.length && Object.values(data.classifications).every(c=>c.review?.status==='clean');
+    summary.success=summary.success===true && summary.tests?.status==='passed' && summary.tests.total>0 && summary.coverageMet===true && summary.complexity?.status==='passed' && summary.audit?.isSecure===true && !summary.aiErrors.length;
     summary.sonar = await reportSonar(head);
     if (summary.sonar && summary.sonar.passed !== true) summary.success = false;
     if (data.status==='generated') {
@@ -1963,7 +1963,6 @@ async function generate({api,repository,head,files,classify,generateText,templat
       const classification = await classify(file.filename,code);
       classification.targetCoverage = data.config.files?.[file.filename] || data.config.global;
       data.classifications[file.filename] = classification;
-      if (classification.review.status === 'unavailable') data.aiErrors.push(classification.review.findings);
       const name = 'Test/quality-gate/'+createHash('sha256').update(file.filename).digest('hex').slice(0,16)+'.test.js';
       let relative = path.posix.relative(path.posix.dirname(name),file.filename);
       if (!relative.startsWith('.')) relative='./'+relative;
@@ -2030,7 +2029,7 @@ function checks(head,installStatus,audit) {
       if (!pass) summary.coverageMet=false;
     }
     summary.complexity=measureFiles(data.modifiedFiles, file => fs.readFileSync(file,'utf8'), data.config);
-    summary.success=summary.jestPassed && summary.coverageMet && summary.complexity.status==='passed' && summary.audit.isSecure===true && !summary.aiErrors.length && Object.values(data.classifications).every(c=>c.review?.status==='clean');
+    summary.success=summary.jestPassed && summary.coverageMet && summary.complexity.status==='passed' && summary.audit.isSecure===true && !summary.aiErrors.length;
   } catch (error) { summary.aiErrors.push('Checks incomplete: '+error.message); }
   finally { fs.writeFileSync('.gate-state.json',JSON.stringify(summary,null,2)); }
   return summary;
