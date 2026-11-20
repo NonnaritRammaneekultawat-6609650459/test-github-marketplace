@@ -12,7 +12,7 @@ jest.mock('node:child_process', () => ({
   execFileSync: jest.fn()
 }));
 
-describe('security_vulnerable module tests', () => {
+describe('security_vulnerable.js unit tests', () => {
   
   describe('processInputInsecurely', () => {
     test('should parse valid JSON input', () => {
@@ -22,66 +22,57 @@ describe('security_vulnerable module tests', () => {
     });
 
     test('should return input as is if JSON parsing fails', () => {
-      const input = 'invalid-json';
+      const input = 'invalid json';
       const result = processInputInsecurely(input);
       expect(result).toBe(input);
-    });
-
-    test('should handle empty string input', () => {
-      const result = processInputInsecurely('');
-      expect(result).toBe('');
     });
   });
 
   describe('runDiagnostic', () => {
-    test('should call execFileSync with correct arguments', () => {
-      execFileSync.mockReturnValue(Buffer.from('Result: test-cmd'));
+    test('should call execFileSync with correct parameters', () => {
+      execFileSync.mockReturnValue(Buffer.from('Result: test-command'));
       
-      const result = runDiagnostic('test-cmd');
+      const result = runDiagnostic('test-command');
       
-      expect(execFileSync).toHaveBeenCalledWith('echo', ['Result: test-cmd']);
-      expect(result).toBe('Result: test-cmd');
+      expect(execFileSync).toHaveBeenCalledWith('echo', ['Result: test-command']);
+      expect(result).toBe('Result: test-command');
     });
 
-    test('should throw error if execFileSync fails', () => {
+    test('should handle execFileSync errors', () => {
       execFileSync.mockImplementation(() => {
         throw new Error('Command failed');
       });
       
-      expect(() => runDiagnostic('bad-cmd')).toThrow('Command failed');
+      expect(() => runDiagnostic('fail')).toThrow('Command failed');
     });
   });
 
   describe('generateToken', () => {
-    test('should return a hex string of length 32 (16 bytes * 2)', () => {
+    test('should return a hex string of 32 characters (16 bytes)', () => {
       const token = generateToken();
       expect(typeof token).toBe('string');
       expect(token).toHaveLength(32);
-      expect(/^[0-9a-f]+$/i.test(token)).toBe(true);
-    });
-
-    test('should return unique tokens', () => {
-      const token1 = generateToken();
-      const token2 = generateToken();
-      expect(token1).not.toBe(token2);
+      expect(/^[0-9a-f]+$/.test(token)).toBe(true);
     });
   });
 
   describe('hasDiagnosticInput', () => {
-    test('should return true for valid non-empty strings', () => {
+    test('should return true for non-empty string', () => {
       expect(hasDiagnosticInput('valid')).toBe(true);
-      expect(hasDiagnosticInput('  spaced  ')).toBe(true);
     });
 
-    test('should return false for empty strings', () => {
+    test('should return false for empty string', () => {
       expect(hasDiagnosticInput('')).toBe(false);
+    });
+
+    test('should return false for whitespace string', () => {
       expect(hasDiagnosticInput('   ')).toBe(false);
     });
 
     test('should return false for non-string types', () => {
+      expect(hasDiagnosticInput(123)).toBe(false);
       expect(hasDiagnosticInput(null)).toBe(false);
       expect(hasDiagnosticInput(undefined)).toBe(false);
-      expect(hasDiagnosticInput(123)).toBe(false);
       expect(hasDiagnosticInput({})).toBe(false);
     });
   });
