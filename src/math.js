@@ -75,5 +75,10 @@ function modulo(a, b) {
   return Object.is(result, -0) ? 0 : result;
 }
 
-module.exports = { add, subtract, multiply, divide, calculatePercentage, modulo };
+function absoluteDifference(a, b) {
+  validateNumbers(a, b);
+  return Math.abs(a - b);
+}
+
+module.exports = { add, subtract, multiply, divide, calculatePercentage, modulo, absoluteDifference };
 // Trigger AI scan
