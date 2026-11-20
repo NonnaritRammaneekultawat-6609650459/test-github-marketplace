@@ -1,7 +1,6 @@
 /*
 *****/
 const { execFileSync } = require('node:child_process');
-const crypto = require('node:crypto');
 require('dotenv').config();
 
 // Secrets are handled via process.env and not exported
@@ -24,13 +23,8 @@ function runDiagnostic(command) {
   return execFileSync('echo', [`Result: ${command}`]).toString();
 }
 
-function generateToken() {
-  // SECURE: Use cryptographically strong random values
-  return crypto.randomBytes(16).toString('hex');
-}
-
 function hasDiagnosticInput(value) {
   return typeof value === 'string' && value.trim().length > 0;
 }
 
-module.exports = { processInputInsecurely, runDiagnostic, generateToken, hasDiagnosticInput };
+module.exports = { processInputInsecurely, runDiagnostic, hasDiagnosticInput };
