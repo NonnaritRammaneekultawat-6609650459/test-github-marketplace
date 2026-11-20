@@ -3,10 +3,10 @@ const { processInputInsecurely, runDiagnostic, hasDiagnosticInput } = require('.
 const { execFileSync } = require('node:child_process');
 
 jest.mock('node:child_process', () => ({
-  execFileSync: jest.fn()
+  execFileSync: jest.fn(),
 }));
 
-describe('security_vulnerable module', () => {
+describe('security_vulnerable.js unit tests', () => {
   
   describe('processInputInsecurely', () => {
     test('should parse valid JSON input', () => {
@@ -15,57 +15,58 @@ describe('security_vulnerable module', () => {
       expect(result).toEqual({ key: 'value' });
     });
 
-    test('should return input as is when JSON parsing fails', () => {
-      const input = 'invalid-json';
+    test('should return input as is when JSON is invalid', () => {
+      const input = 'invalid json';
       const result = processInputInsecurely(input);
-      expect(result).toBe('invalid-json');
+      expect(result).toBe(input);
     });
 
-    test('should handle empty string gracefully', () => {
-      const result = processInputInsecurely('');
-      expect(result).toBe('');
+    test('should handle non-string input by returning it', () => {
+      const input = 123;
+      const result = processInputInsecurely(input);
+      expect(result).toBe(123);
     });
   });
 
   describe('runDiagnostic', () => {
-    test('should call execFileSync with correct arguments', () => {
+    test('should call execFileSync with expected arguments', () => {
+      const command = 'test-cmd';
       execFileSync.mockReturnValue(Buffer.from('Result: test-cmd'));
       
-      const result = runDiagnostic('test-cmd');
+      const result = runDiagnostic(command);
       
       expect(execFileSync).toHaveBeenCalledWith('echo', ['Result: test-cmd']);
       expect(result).toBe('Result: test-cmd');
     });
 
-    test('should handle command execution error', () => {
+    test('should propagate errors if execFileSync fails', () => {
       execFileSync.mockImplementation(() => {
         throw new Error('Command failed');
       });
 
       expect(() => {
-        runDiagnostic('malicious-cmd');
+        runDiagnostic('bad-cmd');
       }).toThrow('Command failed');
     });
   });
 
   describe('hasDiagnosticInput', () => {
-    test('should return true for valid non-empty string', () => {
-      expect(hasDiagnosticInput('valid input')).toBe(true);
+    test('should return true for valid non-empty strings', () => {
+      expect(hasDiagnosticInput('valid')).toBe(true);
+      expect(hasDiagnosticInput('  spaced  ')).toBe(true);
     });
 
-    test('should return false for empty string', () => {
+    test('should return false for empty strings', () => {
       expect(hasDiagnosticInput('')).toBe(false);
-    });
-
-    test('should return false for string with only whitespace', () => {
       expect(hasDiagnosticInput('   ')).toBe(false);
     });
 
     test('should return false for non-string types', () => {
-      expect(hasDiagnosticInput(123)).toBe(false);
       expect(hasDiagnosticInput(null)).toBe(false);
       expect(hasDiagnosticInput(undefined)).toBe(false);
+      expect(hasDiagnosticInput(123)).toBe(false);
       expect(hasDiagnosticInput({})).toBe(false);
+      expect(hasDiagnosticInput([])).toBe(false);
     });
   });
 });
