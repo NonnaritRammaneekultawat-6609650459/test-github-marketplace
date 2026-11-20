@@ -1,1 +1,20 @@
-{"decisions": []}
+{
+  "decisions": [
+    "@actions/github",
+    "@actions/http-client",
+    "@fastify/busboy",
+    "@jest/core",
+    "@jest/reporters",
+    "brace-expansion",
+    "glob",
+    "jest",
+    "jest-circus",
+    "jest-cli",
+    "jest-config",
+    "jest-runner",
+    "jest-runtime",
+    "js-yaml",
+    "minimatch",
+    "undici"
+  ]
+}
