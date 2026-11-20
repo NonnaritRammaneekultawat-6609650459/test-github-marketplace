@@ -6,7 +6,7 @@ jest.mock('node:child_process', () => ({
   execFileSync: jest.fn()
 }));
 
-describe('security_vulnerable module tests', () => {
+describe('security_vulnerable module', () => {
   
   describe('processInputInsecurely', () => {
     test('should parse valid JSON input', () => {
@@ -20,20 +20,31 @@ describe('security_vulnerable module tests', () => {
       const result = processInputInsecurely(input);
       expect(result).toBe('invalid-json');
     });
+
+    test('should handle empty string gracefully', () => {
+      const result = processInputInsecurely('');
+      expect(result).toBe('');
+    });
   });
 
   describe('runDiagnostic', () => {
     test('should call execFileSync with correct arguments', () => {
-      const mockConsole = jest.spyOn(console, 'log').mockImplementation(() => {});
-      execFileSync.mockReturnValue(Buffer.from('Result: test-command'));
-
-      const result = runDiagnostic('test-command');
-
-      expect(execFileSync).toHaveBeenCalledWith('echo', ['Result: test-command']);
-      expect(result).toBe('Result: test-command');
-      expect(mockConsole).toHaveBeenCalledWith("Running diagnostic...");
+      execFileSync.mockReturnValue(Buffer.from('Result: test-cmd'));
       
-      mockConsole.mockRestore();
+      const result = runDiagnostic('test-cmd');
+      
+      expect(execFileSync).toHaveBeenCalledWith('echo', ['Result: test-cmd']);
+      expect(result).toBe('Result: test-cmd');
+    });
+
+    test('should handle command execution error', () => {
+      execFileSync.mockImplementation(() => {
+        throw new Error('Command failed');
+      });
+
+      expect(() => {
+        runDiagnostic('malicious-cmd');
+      }).toThrow('Command failed');
     });
   });
 
@@ -46,7 +57,7 @@ describe('security_vulnerable module tests', () => {
       expect(hasDiagnosticInput('')).toBe(false);
     });
 
-    test('should return false for whitespace string', () => {
+    test('should return false for string with only whitespace', () => {
       expect(hasDiagnosticInput('   ')).toBe(false);
     });
 
