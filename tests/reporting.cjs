@@ -36,10 +36,11 @@ test('JavaScript shares five reports while retaining Jest, coverage and Sonar da
     testResults:[{assertionResults:[{status:'passed',fullName:'adds'},{status:'failed',fullName:'rejects'},{status:'pending',fullName:'later'}]}]},'test log',1);
   const parts=renderJavaScriptComments({tests,modifiedFiles:['src/a.js'],testsGenerated:1,
     classifications:{'src/a.js':{importance:'high',targetCoverage:90,review:{status:'unavailable',findings:'API unavailable'}}},
-    fileStatus:{'src/a.js':{actual:75,pass:false}},coverageMet:false,
+    fileStatus:{'src/a.js':{actual:75,required:90,importance:'critical',source:'AI recommendation',pass:false}},coverageMet:false,
     audit:{status:'complete',isSecure:true,moderate:2},sonar:{passed:true,metrics:{bugs:0}}},'model','abc');
   assert.deepEqual(parts.map(p=>p.key),['tests','complexity','sonar','security','ai']);
-  assert.match(parts[0].body,/Jest/); assert.match(parts[0].body,/75%/);
+  assert.match(parts[0].body,/Jest/); assert.match(parts[0].body,/Critical.*75%.*90%.*AI recommendation.*Failed/);
+  assert.match(parts[0].body,/15 percentage points below/);
   assert.match(parts[0].body,/later.*Skipped/); assert.match(parts[0].body,/1 passed · 1 failed · 1 skipped/);
   assert.match(parts[2].body,/SonarCloud · ✅ Passed/);
   assert.match(parts[4].body,/Unavailable/); assert.match(parts[4].body,/API unavailable/);

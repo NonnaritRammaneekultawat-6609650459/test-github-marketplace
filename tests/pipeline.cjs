@@ -136,6 +136,23 @@ test('isolated JavaScript phases generate reviewable tests and run real Jest cov
     assert.equal(summary.tests.passed,1);
     assert.equal(summary.success,true);
     assert.throws(()=>phases.read('different-head'),/stale/);
+
+    fs.writeFileSync('src/math.js', 'module.exports = (a,b) => { if (a < 0) return 0; return a+b; };');
+    for (const [files, proposal, required, source, passed] of [
+      [{},95,95,'AI recommendation',false],
+      [{'src/math.js':50},95,50,'Project override',true],
+      [{},101,50,'Project default',true]
+    ]) {
+      fs.writeFileSync('config_cov.json',JSON.stringify({global:50,files}));
+      const data=await phases.generate({...options,
+        classify:async()=>({importance:'critical',min_coverage_threshold:proposal,review:{status:'clean',findings:'clean'}})});
+      assert.equal(data.classifications['src/math.js'].targetCoverage,required);
+      summary=phases.checks('head','success',()=>({status:'complete',isSecure:true}));
+      assert.equal(summary.tests.status,'passed');
+      assert.ok(summary.coverage.statements.pct >= 50);
+      assert.deepEqual(summary.fileStatus['src/math.js'],{actual:summary.coverage.statements.pct,importance:'critical',required,source,pass:passed});
+      assert.equal(summary.success,passed);
+    }
   } finally {
     process.chdir(original);
     if(fs.existsSync(path.join(root,'node_modules'))) fs.unlinkSync(path.join(root,'node_modules'));

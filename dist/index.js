@@ -1929,6 +1929,21 @@ function read(head) {
   return data;
 }
 
+const validThreshold = value => Number.isInteger(value) && value >= 1 && value <= 100;
+
+function coverageTarget(config, file, classification) {
+  const importance = classification?.review?.status !== 'unavailable' &&
+    ['critical','high','medium','low'].includes(classification?.importance)
+    ? classification.importance : 'unavailable';
+  const override = config.files?.[file];
+  if (validThreshold(override)) return {importance, required:override, source:'Project override'};
+  const proposed = classification?.min_coverage_threshold;
+  if (importance !== 'unavailable' && validThreshold(proposed)) {
+    return {importance, required:proposed, source:'AI recommendation'};
+  }
+  return {importance, required:config.global, source:'Project default'};
+}
+
 async function generate({api,repository,head,files,classify,generateText,template}) {
   const data = {version:1,framework:'javascript',head,status:'unavailable',files:{},classifications:{},modifiedFiles:[],aiErrors:[]};
   try {
@@ -1944,7 +1959,7 @@ async function generate({api,repository,head,files,classify,generateText,templat
       if (Buffer.byteLength(code) > 40000) throw new Error('Source exceeds AI context limit');
       data.modifiedFiles.push(file.filename);
       const classification = await classify(file.filename,code);
-      classification.targetCoverage = data.config.files?.[file.filename] || data.config.global;
+      classification.targetCoverage = coverageTarget(data.config,file.filename,classification).required;
       data.classifications[file.filename] = classification;
       const name = 'Test/quality-gate/'+createHash('sha256').update(file.filename).digest('hex').slice(0,16)+'.test.js';
       let relative = path.posix.relative(path.posix.dirname(name),file.filename);
@@ -2006,9 +2021,9 @@ function checks(head,installStatus,audit) {
     summary.fileStatus={};
     for (const file of data.modifiedFiles) {
       const actual=coverage[path.resolve(file)]?.statements?.pct;
-      const required=data.config.files?.[file] || data.config.global;
-      const pass=Number.isFinite(actual) && actual>=required;
-      summary.fileStatus[file]={actual,required,pass};
+      const target=coverageTarget(data.config,file,data.classifications?.[file]);
+      const pass=Number.isFinite(actual) && actual>=target.required;
+      summary.fileStatus[file]={actual,...target,pass};
       if (!pass) summary.coverageMet=false;
     }
     summary.complexity=measureFiles(data.modifiedFiles, file => fs.readFileSync(file,'utf8'), data.config);
@@ -2139,14 +2154,32 @@ function testReport(s, run, repo) {
   const cases = t.cases || [...(t.log || '').matchAll(/^\s*(not ok|ok)\s+\d+\s+-\s+(.+)$/gm)].map(m => ({
     name:m[2], status:/# (SKIP|TODO)/i.test(m[2]) ? 'skipped' : m[1] === 'ok' ? 'passed' : 'failed'
   }));
-  const sections = ['## 🧪 Test Results & Coverage · ' + label(status),
+  const reportStatus = s.runner === 'Jest' && status === 'passed' && coverage?.status === 'failed' ? 'failed' : status;
+  const sections = ['## 🧪 Test Results & Coverage · ' + label(reportStatus),
     '> **Test files** · ' + links,
     '**Analyzed commit** · '+cell(s.head),
     '**Overall PR result** · ' + label(s.success ? 'passed' : 'failed'),
     '**Runner** · ' + cell(s.runner || 'Node + jsdom') + ' · ' +
       ['passed','failed','skipped'].map(key => (t[key] ?? '—') + ' ' + key).join(' · ')];
   if (cases.length) sections.push(table(['Test case','Expected','Actual','Result','Failure details'], cases.slice(0,30).map(c => [c.name,c.expected,c.actual,label(c.status),c.detail])));
-  sections.push(table(['Coverage','Measured','Minimum','Result'], [
+  if (s.runner === 'Jest' && coverage) {
+    const pct = value => Number.isFinite(value) ? value + '%' : '—';
+    sections.push(table(['Coverage','Measured','Minimum','Result'],
+      [['Statements',pct(coverage.metrics?.statements?.pct),pct(coverage.required),label(coverage.overallStatus)]]));
+    const rows = [];
+    const failures = [];
+    for (const [file, metric] of Object.entries(coverage.files).slice(0,30)) {
+      const actual = metric.statements?.pct;
+      const required = coverage.fileThresholds[file] ?? coverage.required;
+      const measured = Number.isFinite(actual) && Number.isFinite(required);
+      const passed = measured && actual >= required;
+      const importance = ({critical:'Critical',high:'High',medium:'Medium',low:'Low'})[metric.importance] || 'Unavailable';
+      rows.push([file,importance,pct(actual),pct(required),metric.source,label(measured ? passed ? 'passed':'failed' : 'unavailable')]);
+      if (measured && !passed) failures.push(file + ' is ' + Number((required-actual).toFixed(2)) + ' percentage points below its required coverage.');
+    }
+    if (rows.length) sections.push('### Coverage by file\n\n' + table(['File','AI Importance','Measured','Required','Threshold Source','Result'],rows));
+    if (failures.length) sections.push('**Blocking coverage conditions**\n\n' + bullets(failures));
+  } else sections.push(table(['Coverage','Measured','Minimum','Result'], [
     ['Statements',coverage?.metrics?.statements?.pct == null ? '—' : coverage.metrics.statements.pct + '%',
       coverage?.required == null ? '—' : coverage.required + '%',label(coverage?.status)],
     ...Object.entries(coverage?.files || {}).slice(0,30).map(([file,m]) => [file,m.statements?.pct == null ? '—' : m.statements.pct+'%',
@@ -2225,9 +2258,11 @@ function renderJavaScriptComments(source, model, head) {
     ? source.coverageMet ? 'passed':'failed':'unavailable',
     required:measurements.required,metrics:{statements:{pct:actual}}, files:{},fileThresholds:{}};
   for (const [file,m] of Object.entries(source.fileStatus || {})) {
-    summary.coverage.files[file]={statements:{pct:m.actual}};
+    summary.coverage.files[file]={statements:{pct:m.actual},importance:m.importance,source:m.source};
     summary.coverage.fileThresholds[file]=m.required ?? source.classifications?.[file]?.targetCoverage;
   }
+  summary.coverage.overallStatus = Number.isFinite(actual) && Number.isFinite(measurements.required)
+    ? actual >= measurements.required ? 'passed':'failed' : summary.coverage.status;
   const reviews=summary.files.map(file=>({file,...source.classifications?.[file]?.review}));
   const aiErrors=summary.errors.filter(e=>!e.startsWith('Checks incomplete:'));
   const status = ['buggy','suspicious','unavailable'].find(key=>reviews.some(r=>(r.status || 'unavailable') === key));
