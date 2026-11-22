@@ -128,8 +128,8 @@ test('isolated JavaScript phases generate reviewable tests and run real Jest cov
     assert.ok(calls.find(c=>c.method==='POST'&&c.route.endsWith('/git/trees')).body.tree[0].path.startsWith('Test/quality-gate/'));
     await phases.generate({...options,classify:async()=>({review:{status:'unavailable',findings:'AI unavailable'}})});
     summary=phases.checks('head','success',()=>({status:'complete',isSecure:true}));
-    assert.equal(summary.tests.status,'passed');assert.equal(summary.success,false);
-    assert.ok(summary.aiErrors.includes('AI unavailable'));
+    assert.equal(summary.tests.status,'passed');assert.equal(summary.success,true);
+    assert.equal(Object.values(summary.classifications)[0].review.status,'unavailable');
     await phases.generate({...options,files:[]});
     summary=phases.checks('head','success',()=>({status:'complete',isSecure:true}));
     assert.equal(summary.testOrigin,'existing');

@@ -32,6 +32,9 @@ inputs:
   sonar_project_key:
     description: 'SonarCloud project key for commit-bound scan reporting (JavaScript and AngularJS)'
     required: false
+  sonar_scan_reason:
+    description: 'Optional verified scanner diagnostic'
+    required: false
   sonar_scan_status:
     description: 'Result of the isolated sonar job; requires its report-task.txt in .aq-sonar/'
     required: false

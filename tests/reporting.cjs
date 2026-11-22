@@ -7,10 +7,10 @@ const {renderJavaScriptComments,jestResults} = require('../lib/reporting/javascr
 
 test('missing coverage is incomplete while measured zero coverage genuinely fails', () => {
   const missing=renderJavaScriptComments({tests:{status:'unavailable'},coverageMet:false,coverage:{}},'model','abc')[0].body;
-  assert.match(missing,/Coverage \| ⚠️ ยังวัดไม่ได้/);
-  assert.match(missing,/ยังสรุปผลโค้ดไม่ได้/);
+  assert.match(missing,/Statements.*Unavailable/);
+  assert.match(missing,/Test Results & Coverage · ⚠️ Unavailable/);
   const zero=renderJavaScriptComments({tests:{status:'failed',total:1},coverageMet:false,coverage:{statements:{pct:0}}},'model','abc')[0].body;
-  assert.match(zero,/Coverage \| ❌ FAIL/);
+  assert.match(zero,/Statements.*Failed/);
 });
 
 test('AngularJS reports missing or unexecuted coverage as unavailable and keeps real failed tests distinct', () => {
@@ -19,30 +19,30 @@ test('AngularJS reports missing or unexecuted coverage as unavailable and keeps 
     summary.tests = {status, total: 0};
     summary.coverage = {status:'failed',required:80,metrics:{statements:{pct:0}}};
     const report = renderComments(summary,'model')[0].body;
-    assert.match(report,/Coverage \| ⚠️ ยังวัดไม่ได้/);
-    assert.match(report,/ระบบตรวจทำงานไม่สำเร็จ/);
-    assert.ok(!report.includes('เทสต์ไม่ผ่าน'));
+    assert.match(report,/Statements.*Unavailable/);
+    assert.match(report,/Test Results & Coverage · ⚠️ Unavailable/);
+    assert.ok(!report.includes('Test Results & Coverage · ❌ Failed'));
   }
   const summary = emptySummary('abc');
   summary.tests = {status:'failed',total:1,failed:1};
   summary.coverage = {status:'failed',required:80,metrics:Object.fromEntries(['statements','branches','functions','lines'].map(k=>[k,{pct:0}]))};
   const report = renderComments(summary,'model')[0].body;
-  assert.match(report,/เทสต์ไม่ผ่าน/);
-  assert.match(report,/Coverage \| ❌ FAIL/);
+  assert.match(report,/Test Results & Coverage · ❌ Failed/);
+  assert.match(report,/Statements.*Failed/);
 });
 
-test('JavaScript shares three reports while retaining Jest, coverage and Sonar data', () => {
+test('JavaScript shares five reports while retaining Jest, coverage and Sonar data', () => {
   const tests=jestResults({numTotalTests:3,numPassedTests:1,numFailedTests:1,numPendingTests:1,
     testResults:[{assertionResults:[{status:'passed',fullName:'adds'},{status:'failed',fullName:'rejects'},{status:'pending',fullName:'later'}]}]},'test log',1);
   const parts=renderJavaScriptComments({tests,modifiedFiles:['src/a.js'],testsGenerated:1,
     classifications:{'src/a.js':{importance:'high',targetCoverage:90,review:{status:'unavailable',findings:'API unavailable'}}},
     fileStatus:{'src/a.js':{actual:75,pass:false}},coverageMet:false,
     audit:{status:'complete',isSecure:true,moderate:2},sonar:{passed:true,metrics:{bugs:0}}},'model','abc');
-  assert.deepEqual(parts.map(p=>p.key),['tests','security','ai']);
+  assert.deepEqual(parts.map(p=>p.key),['tests','complexity','sonar','security','ai']);
   assert.match(parts[0].body,/Jest/); assert.match(parts[0].body,/75%/);
-  assert.match(parts[0].body,/⏭️.*later/); assert.match(parts[0].body,/\*\*3\*\*.*\*\*1\*\*.*\*\*1\*\*.*\*\*1\*\*/);
-  assert.match(parts[1].body,/SonarCloud/); assert.match(parts[1].body,/PASS/);
-  assert.match(parts[2].body,/รีวิวไม่สำเร็จ/); assert.match(parts[2].body,/API unavailable/);
+  assert.match(parts[0].body,/later.*Skipped/); assert.match(parts[0].body,/1 passed · 1 failed · 1 skipped/);
+  assert.match(parts[2].body,/SonarCloud · ✅ Passed/);
+  assert.match(parts[4].body,/Unavailable/); assert.match(parts[4].body,/API unavailable/);
   assert.ok(parts.every(p=>!p.body.includes('AngularJS 1.x')));
 });
 
@@ -50,8 +50,8 @@ test('JavaScript skipped and absent Jest results never invent passing counts', (
   assert.equal(jestResults(null,'process failed',1).status,'unavailable');
   assert.equal(jestResults({numTotalTests:0},'',0).status,'unavailable');
   const parts=renderJavaScriptComments({skipped:true},'model','abc');
-  assert.equal(parts.length,3); assert.match(parts[0].body,/SKIPPED/);
-  assert.match(parts[1].body,/ตรวจไม่สำเร็จ/);
+  assert.equal(parts.length,5); assert.match(parts[0].body,/Skipped/);
+  assert.match(parts[3].body,/Unavailable/);
 });
 
 test('AI errors remain visible even when local JavaScript tests and review otherwise appear successful', () => {
@@ -59,8 +59,8 @@ test('AI errors remain visible even when local JavaScript tests and review other
     tests:{status:'passed',total:1,passed:1},
     classifications:{'src/a.js':{review:{status:'clean',findings:'clean'}}},
     aiErrors:['AI model or API URL was not found (404).']}, 'vendor/model', 'abc');
-  assert.match(parts[2].body,/รีวิวไม่สำเร็จ/);
-  assert.match(parts[2].body,/not found \(404\)/);
+  assert.match(parts[4].body,/Unavailable/);
+  assert.match(parts[4].body,/not found \(404\)/);
   assert.match(parts[0].body,/not found \(404\)/);
 });
 
@@ -71,25 +71,25 @@ test('reports separate tests, security and AI with readable results and escaped 
   summary.audit={status:'complete',isSecure:false,high:1,details:['angular (high)']};
   summary.ai={status:'suspicious',findings:'Check persistence',remediation:'Use error handling'};
   const parts=renderComments(summary,'model');
-  assert.deepEqual(parts.map(p=>p.key),['tests','security','ai']);
+  assert.deepEqual(parts.map(p=>p.key),['tests','complexity','sonar','security','ai']);
   assert.match(parts[0].body,/adds items/);
   assert.match(parts[0].body,/bad &#124; input/);
   assert.ok(!parts[0].body.includes('<script>'));
   assert.ok(!parts[0].body.includes('angular (high)'));
-  assert.match(parts[1].body,/angular \(high\)/);
-  assert.ok(!parts[1].body.includes('Check persistence'));
-  assert.match(parts[2].body,/Check persistence/);
-  assert.match(parts[2].body,/Use error handling/);
+  assert.match(parts[3].body,/angular \(high\)/);
+  assert.ok(!parts[3].body.includes('Check persistence'));
+  assert.match(parts[4].body,/Check persistence/);
+  assert.match(parts[4].body,/Use error handling/);
 });
 
 test('missing audit and tests display unavailable values rather than false passes', () => {
   const parts=renderComments(emptySummary('abc'),'model');
-  assert.match(parts[0].body,/UNAVAILABLE/);
-  assert.match(parts[1].body,/ตรวจไม่สำเร็จ/);
-  assert.match(parts[1].body,/\*\*—\*\*/);
+  assert.match(parts[0].body,/Unavailable/);
+  assert.match(parts[3].body,/Unavailable/);
+  assert.match(parts[3].body,/—/);
 });
 
-test('publishing migrates the old comment and updates three sections without duplicates', async () => {
+test('publishing migrates the old comment and updates five sections without duplicates', async () => {
   const entries=[
     {id:1,user:{login:'github-actions[bot]'},body:'<!-- aq-angularjs-review --> old'},
     {id:2,user:{login:'human'},body:markers.security}
@@ -107,7 +107,7 @@ test('publishing migrates the old comment and updates three sections without dup
   const parts=renderComments(emptySummary('abc'),'model');
   const first=await publishComments(octokit,{owner:'o',repo:'r'},1,parts);
   const second=await publishComments(octokit,{owner:'o',repo:'r'},1,parts);
-  assert.equal(entries.length,4);
+  assert.equal(entries.length,6);
   assert.deepEqual(first.map(p=>p.id),second.map(p=>p.id));
   assert.equal(entries[1].body,markers.security);
   for(const part of first){

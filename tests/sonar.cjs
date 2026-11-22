@@ -38,6 +38,15 @@ test('Sonar reads the current task and queries its analysis ID, with PR-scoped m
   assert.equal(calls[2].searchParams.get('pullRequest'), '11');
 }));
 
+test('only a diagnosed scanner failure shows the Automatic Analysis remedy', async () => {
+  const failed = await readSonarResults({scanStatus:'failure',scanReason:'automatic_analysis_enabled'});
+  const generic = await readSonarResults({scanStatus:'failure'});
+  const render = sonar => renderComments({...emptySummary('abc'),sonar},'model').find(p=>p.key==='sonar').body;
+  assert.match(render(failed),/You are running CI analysis while Automatic Analysis is enabled\./);
+  assert.match(render(failed),/Re-run failed jobs/);
+  assert.doesNotMatch(render(generic),/Automatic Analysis/);
+});
+
 test('failed or missing scan cannot reuse an older passing analysis', async () => fixture(async (options, calls) => {
   for (const scanStatus of ['failure', 'skipped', 'cancelled', '']) {
     const result = await readSonarResults({...options, scanStatus});
@@ -89,11 +98,11 @@ test('AngularJS retains test evidence when Sonar fails; both frameworks share cl
     summary.sonar = sonar;
     assert.equal(isPassing(summary), sonar.passed === true);
     assert.equal(summary.tests.status, 'passed');
-    const angular = renderComments(summary, 'model')[1].body;
-    const js = renderJavaScriptComments({...summary, modifiedFiles:[], classifications:{}}, 'model', 'abc')[1].body;
-    const expected = sonar.passed == null ? 'UNAVAILABLE' : sonar.passed ? 'PASS' : 'FAIL';
-    assert.ok(angular.split('### 📡 SonarCloud')[1].includes(expected));
-    assert.equal(angular.split('### 📡 SonarCloud')[1], js.split('### 📡 SonarCloud')[1]);
+    const angular = renderComments(summary, 'model')[2].body;
+    const js = renderJavaScriptComments({...summary, modifiedFiles:[], classifications:{}}, 'model', 'abc')[2].body;
+    const expected = sonar.passed == null ? 'Unavailable' : sonar.passed ? 'Passed' : 'Failed';
+    assert.ok(angular.includes(expected));
+    assert.equal(angular, js);
     assert.ok(formatReport(summary, 'model').includes(`| SonarCloud | ${sonar.passed == null ? '⚠️ UNAVAILABLE' : sonar.passed ? '✅ PASS' : '❌ FAIL'} |`));
   }
 });
@@ -128,9 +137,9 @@ for (const enabled of ['true','false','','missing-key']) for (const projectType 
   assert.match(report, /SonarCloud/);
   if (enabled === 'true') assert.match(report, /scan did not complete successfully/);
   else if (enabled === 'missing-key') assert.match(report, /sonar_project_key is missing/);
-  else assert.match(report, /ไม่ได้เปิดใช้ SonarCloud/);
+  else assert.match(report, /SonarCloud is disabled/);
   assert.match(report,/accepted until 2030-01-01/);
   assert.match(report,/Expired exception: other/);
-  assert.match(report, /\*\*✅ PASS\*\*/);
+  assert.match(report, /Dependency Audit · ✅ Passed/);
   assert.ok(!report.includes('fake-sonar-key'));
 }));

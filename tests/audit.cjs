@@ -43,8 +43,8 @@ test('invalid output is never a pass, empty valid output is a pass', () => {
 });
 test('security report preserves accepted-risk reasons and audit errors', () => {
   const summary=emptySummary('abc'); summary.audit=check(report(),[decision]);
-  const output=renderComments(summary,'model')[1].body;
+  const output=renderComments(summary,'model').find(part=>part.key==='security').body;
   assert.match(output,/Accepted temporarily/); assert.match(output,/2030-01-01/); assert.match(output,/#123/);
   summary.audit=check(report(),[{name:'legacy'}]);
-  assert.match(renderComments(summary,'model')[1].body,/Each audit exception requires/);
+  assert.match(renderComments(summary,'model').find(part=>part.key==='security').body,/Each audit decision must/);
 });
