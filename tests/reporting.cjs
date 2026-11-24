@@ -117,3 +117,12 @@ test('publishing migrates the old comment and updates five sections without dupl
     for(const other of first) assert.ok(comment.body.includes(other.url));
   }
 });
+
+test('a finding, its advice and its example share the English AI comment', () => {
+  const review = {status:'buggy', findings:'Missing price', remediation:'Check the price.', exampleFix:'return price ?? 0;'};
+  const source = {modifiedFiles:['src/cart.js'],classifications:{'src/cart.js':{review}}};
+  const comments = renderJavaScriptComments(source,'model','head').filter(part => part.key === 'ai');
+  assert.equal(comments.length,1);
+  for (const text of ['**File** | src/cart.js','**Finding** | Missing price','**Suggested fix** | Check the price.',
+    '**Example fix**','~~~javascript','return price ?? 0;']) assert.ok(comments[0].body.includes(text),text);
+});

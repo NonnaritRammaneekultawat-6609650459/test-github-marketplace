@@ -1209,7 +1209,8 @@ async function classifyFileWithGemini(file, code, frameworkContext = '') {
         "review": {
           "status": "clean" | "suspicious" | "buggy",
           "findings": "Brief explanation of any logic errors or improvements needed. If clean, say 'No issues identified'.",
-          "remediation": "Provide a small code snippet or instruction to fix the issue if found."
+          "remediation": "Explain the suggested fix in plain English, or leave empty if clean.",
+    "exampleFix": "For an actionable finding, give a concise corrected code example for this file. Preserve its interface where possible. Use raw code without Markdown fences. Otherwise return an empty string."
         }
       }
 
@@ -1859,7 +1860,7 @@ const path = __nccwpck_require__(6760);
 const vm = __nccwpck_require__(714);
 const parser = __nccwpck_require__(5429);
 const {createHash} = __nccwpck_require__(7598);
-const {spawnSync} = __nccwpck_require__(1421);
+const {runJest} = __nccwpck_require__(9528);
 const {childEnvironment} = __nccwpck_require__(9329);
 const {jestResults} = __nccwpck_require__(8338);
 const {MARKER} = __nccwpck_require__(8484);
@@ -2004,12 +2005,10 @@ function checks(head,installStatus,audit) {
       fs.mkdirSync(path.dirname(name),{recursive:true}); fs.writeFileSync(name,text);
     }
     for (const file of ['.aq-jest-results.json','coverage/coverage-summary.json']) if (fs.existsSync(file)) fs.unlinkSync(file);
-    const result = spawnSync(process.platform === 'win32' ? 'npx.cmd':'npx',
-      ['--no-install','jest','--runInBand','--json','--outputFile=.aq-jest-results.json','--coverage','--coverageReporters=json-summary','--coverageReporters=lcov'],
-      {encoding:'utf8',shell:process.platform==='win32',timeout:120000,maxBuffer:4*1024*1024,env:childEnvironment()});
+    const {result,entries} = runJest(childEnvironment());
     console.log(result.stdout || ''); console.log(result.stderr || '');
     const results=JSON.parse(fs.readFileSync('.aq-jest-results.json','utf8'));
-    summary.tests=jestResults(results,(result.stdout||'')+'\n'+(result.stderr||''),result.status);
+    summary.tests=jestResults(results,(result.stdout||'')+'\n'+(result.stderr||''),result.status,entries);
     for (const name of Object.keys(data.files)) {
       if (!results.testResults?.some(suite=>path.resolve(suite.name)===path.resolve(name))) throw new Error('Jest config did not run all generated tests; include Test/quality-gate/ in the project test roots');
     }
@@ -2040,6 +2039,88 @@ function state(head) {
   return data;
 }
 module.exports={generate,checks,read,state,fixSourceImportPaths};
+
+
+/***/ }),
+
+/***/ 9528:
+/***/ ((module, __unused_webpack_exports, __nccwpck_require__) => {
+
+const fs = __nccwpck_require__(3024);
+const os = __nccwpck_require__(8161);
+const path = __nccwpck_require__(6760);
+const {createRequire} = __nccwpck_require__(8995);
+const {spawnSync} = __nccwpck_require__(1421);
+
+// This function runs inside Jest's test environment, including when the Action is bundled.
+function registerEvidence(fs, inspect) {
+  const registry = globalThis[Symbol.for('$$jest-matchers-object')];
+  if (!registry) return;
+  let count = 0;
+  const format = value => inspect(value, {depth:2, maxArrayLength:6, maxStringLength:100,
+    customInspect:false, breakLength:Infinity}).slice(0,180);
+  for (const [name, matcher] of Object.entries(registry.matchers)) {
+    registry.matchers[name] = new Proxy(matcher, {
+      apply(target, context, args) {
+        const result = Reflect.apply(target, context, args);
+        try {
+          const test = context.currentConcurrentTestName?.() || context.currentTestName;
+          if (test && count < 300) {
+            const expected = name === 'toBe' && !context.isNot ? format(args[1])
+              : (context.isNot ? 'not.' : '') + name + '(' + args.slice(1).map(format).join(', ') + ')';
+            const entry = {file:context.testPath, test, expected, actual:format(args[0])};
+            fs.appendFileSync(process.env.AQ_ASSERTIONS, JSON.stringify(entry)+'\n');
+            count++;
+          }
+        } catch { /* Optional diagnostics must preserve the original matcher outcome. */ }
+        return result;
+      }
+    });
+  }
+}
+
+function runJest(env) {
+  const temp = fs.mkdtempSync(path.join(os.tmpdir(), 'aqg-jest-'));
+  try {
+    const projectRequire = createRequire((__nccwpck_require__(3136).pathToFileURL)(process.cwd() + path.sep + '__aq_project__.cjs'));
+    const cli = projectRequire.resolve('jest/bin/jest');
+    const setup = path.join(temp,'capture.cjs');
+    const evidence = path.join(temp,'assertions.jsonl');
+    const options = {encoding:'utf8',timeout:120000,maxBuffer:4*1024*1024,env:{...env,AQ_ASSERTIONS:evidence}};
+    const args = ['--runInBand','--json','--outputFile=.aq-jest-results.json','--coverage',
+      '--coverageReporters=json-summary','--coverageReporters=lcov'];
+    // Retain each project's configured test runner and setup modules.
+    const config = spawnSync(process.execPath,[cli,'--showConfig'],options);
+    if (config.status === 0) {
+      const {configs} = JSON.parse(config.stdout);
+      const runners = Object.fromEntries(configs.map(project => [project.id,project.testRunner]));
+      fs.writeFileSync(setup,'(' + registerEvidence.toString() + ")(require('node:fs'), require('node:util').inspect);");
+      const wrapper = path.join(temp,'runner.cjs');
+      fs.writeFileSync(wrapper, [
+        'const runners = '+JSON.stringify(runners)+';',
+        'module.exports = (globalConfig, config, ...rest) => {',
+        '  const runner = require(runners[config.id]);',
+        '  const setupFilesAfterEnv = [...config.setupFilesAfterEnv, '+JSON.stringify(setup)+'];',
+        '  return (runner.default || runner)(globalConfig, {...config,setupFilesAfterEnv}, ...rest);',
+        '};'
+      ].join('\n'));
+      args.push('--testRunner',wrapper);
+    }
+    const result = spawnSync(process.execPath,[cli,...args],options);
+    const entries = [];
+    if (fs.existsSync(evidence) && fs.statSync(evidence).size < 4*1024*1024) {
+      for (const line of fs.readFileSync(evidence,'utf8').trim().split('\n')) {
+        try { entries.push(JSON.parse(line)); } catch { /* Ignore incomplete records. */ }
+      }
+    }
+    return {result,entries};
+  } finally {
+    fs.rmSync(temp,{recursive:true,force:true});
+  }
+}
+
+module.exports = {runJest};
+
 
 
 /***/ }),
@@ -2215,7 +2296,7 @@ function renderComments(summary, model) {
   const ai = s.ai;
   const title = {clean:'✅ Passed',suspicious:'⚠️ Review suggested',buggy:'🔎 Findings reported',skipped:'⏭️ Skipped'}[ai.status] || label('unavailable');
   const review = ['## 🤖 AI Code Review · ' + title, '**Model** · ' + cell(model),
-    safe(ai.findings),safe(ai.remediation),s.reviewDetails,bullets(s.files)];
+    safe(ai.findings),safe(ai.remediation),s.reviewDetails,s.reviewDetails ? null : bullets(s.files)];
   return [{key:'tests',body:testReport(s,run,repo)}, {key:'complexity',body:complexityReport(s.complexity)},
     {key:'sonar',body:sonarDetails(s.sonar,safe) + (run ? '\n\n[Open workflow logs]('+run+')':'')},
     {key:'security',body:security.filter(Boolean).join('\n\n')},{key:'ai',body:review.filter(Boolean).join('\n\n')}];
@@ -2232,18 +2313,43 @@ module.exports = {renderComments};
 const {renderComments} = __nccwpck_require__(8596);
 const {emptySummary, safe} = __nccwpck_require__(9329);
 
-function jestResults(result, log, exitCode) {
+function jestResults(result, log, exitCode, entries = []) {
   if (!result) return {status:'unavailable', log};
-  const cases = (result.testResults || []).flatMap(s => s.assertionResults || []).slice(0,100).map(t => ({
+  const evidence = new Map();
+  for (const row of entries) {
+    if (!row || !['file','test','expected','actual'].every(k => typeof row[k] === 'string')) continue;
+    const key = JSON.stringify([row.file,row.test]);
+    if (!evidence.has(key)) evidence.set(key,[]);
+    const records = evidence.get(key);
+    if (records.length < 8) records.push(row);
+  }
+  const cases = (result.testResults || []).flatMap(s => (s.assertionResults || []).map(t => {
+    const rows = evidence.get(JSON.stringify([s.name,t.fullName || t.title])) || [];
+    const values = key => rows.map((r,i) => (rows.length > 1 ? (i+1)+') ' : '') + r[key]).join(' · ');
+    return {
     name:t.fullName || t.title,
     status:['passed','failed'].includes(t.status) ? t.status : 'skipped',
-    expected:t.failureMessages?.[0]?.match(/^\s*Expected:\s*(.+)$/m)?.[1],
-    actual:t.failureMessages?.[0]?.match(/^\s*Received:\s*(.+)$/m)?.[1],
+    expected:values('expected') || t.failureMessages?.[0]?.match(/^\s*Expected:\s*(.+)$/m)?.[1],
+    actual:values('actual') || t.failureMessages?.[0]?.match(/^\s*Received:\s*(.+)$/m)?.[1],
     detail:t.failureMessages?.[0]?.replace(/\x1b\[[0-9;]*m/g,'').split(/\n\s+at /)[0].slice(0,700)
-  }));
+    };
+  })).slice(0,100);
   return {status:result.numTotalTests ? exitCode === 0 ? 'passed':'failed':'unavailable',
     total:result.numTotalTests,passed:result.numPassedTests,failed:result.numFailedTests,
     skipped:(result.numPendingTests || 0)+(result.numTodoTests || 0),cases,log:log.slice(-8000)};
+}
+
+function renderFinding(review) {
+  const cell = value => safe(value).replace(/\|/g,'&#124;').replace(/[\r\n]+/g,' ');
+  const rows = ['| Section | Details |','| --- | --- |','| **File** | '+cell(review.file)+' |',
+    '| **Finding** | '+cell(review.findings || 'No review details available.')+' |'];
+  if (review.remediation) rows.push('| **Suggested fix** | '+cell(review.remediation)+' |');
+  if (typeof review.exampleFix === 'string' && review.exampleFix.trim()) {
+    const code = review.exampleFix.trim().slice(0,2400);
+    const fence = '~'.repeat(Math.max(3,...Array.from(code.matchAll(/~+/g), m => m[0].length+1)));
+    rows.push('', '**Example fix**', '', fence+'javascript', code, fence);
+  }
+  return rows.join('\n');
 }
 
 function renderJavaScriptComments(source, model, head) {
@@ -2268,8 +2374,7 @@ function renderJavaScriptComments(source, model, head) {
   const status = ['buggy','suspicious','unavailable'].find(key=>reviews.some(r=>(r.status || 'unavailable') === key));
   summary.ai={status:aiErrors.length ? 'unavailable' : source.skipped || source.reviewSkipped ? 'skipped' : status || (reviews.length?'clean':'unavailable'),
     findings:aiErrors.join('\n')};
-  summary.reviewDetails=reviews.map(r=>'### '+safe(r.file)+'\n\n'+safe(r.findings || 'No review details available.')+
-    (r.remediation?'\n\n**Suggested fix** · '+safe(r.remediation):'')).join('\n\n');
+  summary.reviewDetails=reviews.map(renderFinding).join('\n\n');
   return renderComments(summary,model);
 }
 module.exports={renderJavaScriptComments,jestResults};
@@ -34451,6 +34556,14 @@ module.exports = require("node:https");
 
 /***/ }),
 
+/***/ 8995:
+/***/ ((module) => {
+
+"use strict";
+module.exports = require("node:module");
+
+/***/ }),
+
 /***/ 7030:
 /***/ ((module) => {
 
@@ -34480,6 +34593,14 @@ module.exports = require("node:path");
 
 "use strict";
 module.exports = require("node:stream");
+
+/***/ }),
+
+/***/ 3136:
+/***/ ((module) => {
+
+"use strict";
+module.exports = require("node:url");
 
 /***/ }),
 

@@ -123,6 +123,8 @@ test('isolated JavaScript phases generate reviewable tests and run real Jest cov
     let summary=phases.checks('head','success',()=>({status:'complete',isSecure:true}));
     assert.equal(summary.success,true,JSON.stringify(summary));
     assert.equal(summary.tests.passed,1);assert.equal(summary.coverageMet,true);
+    assert.equal(summary.tests.cases[0].expected,'3');
+    assert.equal(summary.tests.cases[0].actual,'3');
     const {api:publish,calls}=apiFixture();
     await publishTests(publish,'user/app',1,'head',generated.files,'success');
     assert.ok(calls.find(c=>c.method==='POST'&&c.route.endsWith('/git/trees')).body.tree[0].path.startsWith('Test/quality-gate/'));
